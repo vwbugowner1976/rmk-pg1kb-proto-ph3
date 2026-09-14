@@ -1,0 +1,62 @@
+[keyboard]
+name = "PG1KB Proto PH3"
+product_name = "PG1KB Proto PH3 RMK"
+vendor_id = 0x4c4b
+product_id = 0x4643
+manufacturer = "vwbugowner1976"
+chip = "nrf52840"
+
+[layout]
+rows = 5
+cols = 12
+map = """
+(0,0) (0,1) (0,2) (0,3) (0,4) (0,5) (0,6) (0,7) (0,8) (0,9) (0,10) (0,11)
+(1,0) (1,1) (1,2) (1,3) (1,4) (1,5) (1,6) (1,7) (1,8) (1,9) (1,10) (1,11)
+(2,0) (2,1) (2,2) (2,3) (2,4) (2,5) (2,6) (2,7) (2,8) (2,9) (2,10) (2,11)
+(3,0) (3,1) (3,2) (3,3) (3,4) (3,5) (3,6) (3,7) (3,8) (3,9) (3,10) (3,11)
+(4,0) (4,1) (4,2) (4,3) (4,4) (4,5) (4,6) (4,7) (4,8) (4,9) (4,10) (4,11)
+"""
+
+[keymap]
+layers = 1
+
+[[keymap.layer]]
+name = "Base"
+keys = """
+No No No No No No No No No No No No
+No No No No No No No No No No No No
+No No No No No No No No No No No No
+No No No No No No No No No No No No
+No No No No No No No No No No No No
+"""
+
+[ble]
+enabled = true
+
+[split]
+connection = "ble"
+
+# Right half = central. Existing PG1KB hardware numbers this half into columns 6..11.
+[split.central]
+rows = 5
+cols = 6
+row_offset = 0
+col_offset = 6
+
+[split.central.matrix]
+row_pins = ["P0_10", "P0_09", "P1_01", "P0_19", "P0_15"]
+col_pins = ["P1_11", "P0_04", "P0_29", "P0_28", "P0_03", "P0_02"]
+
+# Left half = peripheral 0, columns 0..5.
+[[split.peripheral]]
+rows = 5
+cols = 6
+row_offset = 0
+col_offset = 0
+
+[split.peripheral.matrix]
+row_pins = ["P0_15", "P0_19", "P1_01", "P0_09", "P0_10"]
+col_pins = ["P1_11", "P0_04", "P0_29", "P0_28", "P0_03", "P0_02"]
+
+[rmk]
+split_peripherals_num = 1
