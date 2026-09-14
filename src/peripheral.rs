@@ -4,6 +4,7 @@
 mod paw3222;
 mod paw3222_split;
 mod runtime;
+mod trackball_config;
 
 use rmk::macros::rmk_peripheral;
 
