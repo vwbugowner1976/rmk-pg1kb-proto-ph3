@@ -35,6 +35,13 @@ command = "cargo"
 args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central-v2.uf2", "--family", "nrf52840"]
 dependencies = ["objcopy-central"]
 
+# v4 = official RMK 0.9 + hardware-verified custom PAW3222 driver + BLE output.
+[tasks.uf2-central-v4]
+install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = ["hex-to-uf2", "--help"] }
+command = "cargo"
+args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central-v4.uf2", "--family", "nrf52840"]
+dependencies = ["objcopy-central"]
+
 [tasks.uf2-peripheral]
 install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = ["hex-to-uf2", "--help"] }
 command = "cargo"
