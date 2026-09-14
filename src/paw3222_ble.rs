@@ -9,18 +9,12 @@ use rmk::macros::processor;
 use usbd_hid::descriptor::MouseReport;
 
 use crate::paw3222::{MotionDelta, Paw3222, Paw3222Error};
+use crate::runtime;
 
-const REPORT_INTERVAL_MS: u64 = 8; // 125 Hz, same cadence as the verified v1/v2 USB path
+const REPORT_INTERVAL_MS: u64 = 8;
 const DIAG_INTERVAL_MS: u64 = 1000;
+const Q8_ONE: i32 = 256;
 
-/// BLE diagnostic wrapper around the already hardware-verified custom PAW3222
-/// transport/decoder in paw3222.rs.
-///
-/// The sensor implementation itself is intentionally unchanged from v2:
-/// same BitBang SPI, same CS-held X/Y/HI read sequence, same 12-bit handling.
-/// Only the HID destination differs: reports are written to RMK's public
-/// BLE_REPORT_CHANNEL so we can compare BLE transport behavior without using
-/// the t-ogura PAW3222 RMK fork.
 #[processor(subscribe = [PointingSetCpiEvent], poll_interval = 1)]
 pub struct Paw3222BleProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> {
     id: u8,
@@ -97,9 +91,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
                     self.accumulated_y = self.accumulated_y.saturating_add(delta.y as i32);
                 }
                 Ok(None) => {}
-                Err(_) => {
-                    self.read_errors = self.read_errors.saturating_add(1);
-                }
+                Err(_) => self.read_errors = self.read_errors.saturating_add(1),
             }
         }
 
@@ -116,8 +108,14 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             return;
         }
 
-        let x = self.accumulated_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let y = self.accumulated_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let cfg = runtime::config(self.id);
+        let (rot_x, rot_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
+        let gain_q8 = cfg.cursor_gain_q8() as i32;
+        let scaled_x = rot_x.saturating_mul(gain_q8) / Q8_ONE;
+        let scaled_y = rot_y.saturating_mul(gain_q8) / Q8_ONE;
+
+        let x = scaled_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let y = scaled_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
 
         let report = Report::MouseReport(MouseReport {
             buttons: 0,
@@ -128,8 +126,16 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         });
 
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
-            self.accumulated_x -= x as i32;
-            self.accumulated_y -= y as i32;
+            // Remove the amount represented by the report in raw sensor space.
+            // When clipping occurs keep the remainder for the next 8 ms report.
+            if scaled_x.abs() <= i8::MAX as i32 && scaled_y.abs() <= i8::MAX as i32 {
+                self.accumulated_x = 0;
+                self.accumulated_y = 0;
+            } else {
+                // Large bursts are rare; consume one report-sized fraction while preserving sign.
+                self.accumulated_x /= 2;
+                self.accumulated_y /= 2;
+            }
             self.hid_reports = self.hid_reports.saturating_add(1);
             self.last_report = Instant::now();
         } else {
@@ -142,10 +148,9 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             return;
         }
         self.last_diag = Instant::now();
-
         let motion_pin = self.sensor.motion_pin_active();
         info!(
-            "PAW3222 BLE diag ready={} init_error={:?} pid=0x{:02x} 12bit={} mouse_opt=0x{:02x} motion_pin={} motion_reg=0x{:02x} reads={} events={} last_dx={} last_dy={} accum_x={} accum_y={} hid={} hid_busy={} read_err={}",
+            "PAW3222 BLE diag ready={} init_error={:?} pid=0x{:02x} 12bit={} mouse_opt=0x{:02x} motion_pin={} motion_reg=0x{:02x} reads={} events={} last_dx={} last_dy={} accum_x={} accum_y={} hid={} hid_busy={} read_err={} rotation={} gain_q8={}",
             self.ready,
             self.last_init_error,
             self.sensor.last_product_id(),
@@ -162,6 +167,8 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             self.hid_reports,
             self.hid_busy,
             self.read_errors,
+            runtime::config(self.id).rotation().degrees(),
+            runtime::config(self.id).cursor_gain_q8(),
         );
     }
 
@@ -169,7 +176,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         if event.device_id != self.id || !self.ready {
             return;
         }
-
+        runtime::config(self.id).set_cpi(event.cpi);
         info!("PAW3222 BLE set CPI {}", event.cpi);
         if self.sensor.set_resolution(event.cpi).await.is_err() {
             warn!("PAW3222 BLE set CPI failed");
