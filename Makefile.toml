@@ -27,19 +27,22 @@ command = "cargo"
 args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central.uf2", "--family", "nrf52840"]
 dependencies = ["objcopy-central"]
 
-# Diagnostic v2 output uses a distinct file name so the verified v1 UF2 can be
-# kept side-by-side for hardware A/B testing.
 [tasks.uf2-central-v2]
 install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = ["hex-to-uf2", "--help"] }
 command = "cargo"
 args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central-v2.uf2", "--family", "nrf52840"]
 dependencies = ["objcopy-central"]
 
-# v4 = official RMK 0.9 + hardware-verified custom PAW3222 driver + BLE output.
 [tasks.uf2-central-v4]
 install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = ["hex-to-uf2", "--help"] }
 command = "cargo"
 args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central-v4.uf2", "--family", "nrf52840"]
+dependencies = ["objcopy-central"]
+
+[tasks.uf2-central-v5]
+install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = ["hex-to-uf2", "--help"] }
+command = "cargo"
+args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central-v5.uf2", "--family", "nrf52840"]
 dependencies = ["objcopy-central"]
 
 [tasks.uf2-peripheral]
@@ -47,6 +50,15 @@ install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = 
 command = "cargo"
 args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-peripheral.hex", "--output-path", "rmk-pg1kb-proto-ph3-peripheral.uf2", "--family", "nrf52840"]
 dependencies = ["objcopy-peripheral"]
+
+[tasks.uf2-peripheral-v5]
+install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = ["hex-to-uf2", "--help"] }
+command = "cargo"
+args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-peripheral.hex", "--output-path", "rmk-pg1kb-proto-ph3-peripheral-v5.uf2", "--family", "nrf52840"]
+dependencies = ["objcopy-peripheral"]
+
+[tasks.uf2-v5]
+dependencies = ["uf2-central-v5", "uf2-peripheral-v5"]
 
 [tasks.uf2]
 dependencies = ["uf2-central", "uf2-peripheral"]
