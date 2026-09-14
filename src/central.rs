@@ -29,14 +29,4 @@ mod keyboard_central {
             false, // match existing ZMK power-saving behavior initially
         )
     }
-
-    #[register_processor(event)]
-    fn paw3222_pointing_processor() -> rmk::input_device::pointing::PointingProcessor<'static> {
-        let config = rmk::input_device::pointing::PointingProcessorConfig {
-            device_id: 0,
-            ..Default::default()
-        };
-
-        rmk::input_device::pointing::PointingProcessor::new(&keymap, config)
-    }
 }
