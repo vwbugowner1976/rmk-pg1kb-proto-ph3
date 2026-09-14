@@ -33,6 +33,12 @@ No No No No No No No No No No No No
 [ble]
 enabled = true
 
+# Host configurator protocols are intentionally disabled during initial bring-up.
+# These values must match the RMK Cargo features. Vial defaults to true when omitted.
+[host]
+vial_enabled = false
+rynk_enabled = false
+
 [split]
 connection = "ble"
 
