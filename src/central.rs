@@ -33,7 +33,9 @@ mod keyboard_central {
         )
     }
 
-    #[register_processor(event)]
+    // v6: left split trackball is scroll + inertia. The processor subscribes to
+    // PointingEvent and also runs an 8 ms poll loop for the inertia tail.
+    #[register_processor(poll)]
     fn left_split_pointing() -> crate::split_pointing_ble::SplitPointingBleProcessor {
         crate::split_pointing_ble::SplitPointingBleProcessor::new(crate::runtime::LEFT_TRACKBALL_ID)
     }
