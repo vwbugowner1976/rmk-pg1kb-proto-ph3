@@ -17,14 +17,13 @@ Initial RMK port scaffold.
 
 ## Local build
 
+See [`docs/LOCAL_BUILD.md`](docs/LOCAL_BUILD.md) for the WSL2 setup.
+
+Quick build:
+
 ```bash
 cargo build --release --bin central
 cargo build --release --bin peripheral
-```
-
-Generate UF2 files:
-
-```bash
 cargo make uf2 --release
 ```
 
