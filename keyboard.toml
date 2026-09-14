@@ -1,8 +1,8 @@
 [keyboard]
 # RMK legacy BLE advertisements allow at most 16 bytes for the local name.
-# Keep this short so host advertising fits in the 31-byte payload.
+# Keep both name and product_name short so host advertising fits in the 31-byte payload.
 name = "PG1KB-PH3"
-product_name = "PG1KB Proto PH3 RMK"
+product_name = "PG1KB-PH3"
 vendor_id = 0x4c4b
 product_id = 0x4643
 manufacturer = "vwbugowner1976"
