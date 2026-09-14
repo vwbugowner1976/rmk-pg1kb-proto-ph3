@@ -5,6 +5,7 @@ mod paw3222;
 mod paw3222_ble;
 mod runtime;
 mod split_pointing_ble;
+mod trackball_config;
 
 use rmk::macros::rmk_central;
 
@@ -28,13 +29,11 @@ mod keyboard_central {
             spi,
             cs,
             motion,
-            crate::runtime::DEFAULT_CPI,
+            crate::trackball_config::RIGHT_TRACKBALL_CONFIG.cpi(),
             false,
         )
     }
 
-    // v6: left split trackball is scroll + inertia. The processor subscribes to
-    // PointingEvent and also runs an 8 ms poll loop for the inertia tail.
     #[register_processor(poll)]
     fn left_split_pointing() -> crate::split_pointing_ble::SplitPointingBleProcessor {
         crate::split_pointing_ble::SplitPointingBleProcessor::new(crate::runtime::LEFT_TRACKBALL_ID)
