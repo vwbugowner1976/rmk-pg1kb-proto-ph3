@@ -27,19 +27,24 @@ command = "cargo"
 args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central.uf2", "--family", "nrf52840"]
 dependencies = ["objcopy-central"]
 
-# Diagnostic v2 output uses a distinct file name so the verified v1 UF2 can be
-# kept side-by-side for hardware A/B testing.
 [tasks.uf2-central-v2]
 install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = ["hex-to-uf2", "--help"] }
 command = "cargo"
 args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central-v2.uf2", "--family", "nrf52840"]
 dependencies = ["objcopy-central"]
 
-[tasks.uf2-peripheral]
+# v3 = BLE advertising + right key matrix + native RMK PAW3222 pointing path.
+[tasks.uf2-central-v3]
 install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = ["hex-to-uf2", "--help"] }
 command = "cargo"
-args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-peripheral.hex", "--output-path", "rmk-pg1kb-proto-ph3-peripheral.uf2", "--family", "nrf52840"]
-dependencies = ["objcopy-peripheral"]
+args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central-v3.uf2", "--family", "nrf52840"]
+dependencies = ["objcopy-central"]
+
+[tasks.uf2-peripheral]
+install_crate = { crate_name = "cargo-binutils", binary = "cargo", test_arg = ["objcopy", "--help"] }
+command = "cargo"
+args = ["objcopy", "--release", "--bin", "peripheral", "--", "-O", "ihex", "rmk-pg1kb-proto-ph3-peripheral.hex"]
+dependencies = ["build"]
 
 [tasks.uf2]
 dependencies = ["uf2-central", "uf2-peripheral"]
