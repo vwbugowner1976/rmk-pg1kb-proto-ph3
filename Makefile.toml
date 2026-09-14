@@ -27,6 +27,14 @@ command = "cargo"
 args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central.uf2", "--family", "nrf52840"]
 dependencies = ["objcopy-central"]
 
+# Diagnostic v2 output uses a distinct file name so the verified v1 UF2 can be
+# kept side-by-side for hardware A/B testing.
+[tasks.uf2-central-v2]
+install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = ["hex-to-uf2", "--help"] }
+command = "cargo"
+args = ["hex-to-uf2", "--input-path", "rmk-pg1kb-proto-ph3-central.hex", "--output-path", "rmk-pg1kb-proto-ph3-central-v2.uf2", "--family", "nrf52840"]
+dependencies = ["objcopy-central"]
+
 [tasks.uf2-peripheral]
 install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = ["hex-to-uf2", "--help"] }
 command = "cargo"
