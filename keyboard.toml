@@ -1,6 +1,7 @@
 [keyboard]
-name = "PG1KB Proto PH3"
-product_name = "PG1KB Proto PH3 RMK"
+# RMK legacy BLE advertisements allow at most 16 bytes for the local name.
+name = "PG1KB-PH3"
+product_name = "PG1KB-PH3"
 vendor_id = 0x4c4b
 product_id = 0x4643
 manufacturer = "vwbugowner1976"
@@ -20,21 +21,21 @@ map = """
 [keymap]
 layers = 1
 
+# Bring-up map only. Left half remains disabled; right/central 5x6 is enabled
+# so keyboard input and custom PAW3222 BLE reports can be stressed together.
 [[keymap.layer]]
 name = "Base"
 keys = """
-No No No No No No No No No No No No
-No No No No No No No No No No No No
-No No No No No No No No No No No No
-No No No No No No No No No No No No
-No No No No No No No No No No No No
+No No No No No No Y U I O P Enter
+No No No No No No H J K L A B
+No No No No No No N M C D E F
+No No No No No No Kc1 Kc2 Kc3 Kc4 Kc5 Kc6
+No No No No No No F1 F2 F3 F4 F5 F6
 """
 
 [ble]
 enabled = true
 
-# Host configurator protocols are intentionally disabled during initial bring-up.
-# These values must match the RMK Cargo features. Vial defaults to true when omitted.
 [host]
 vial_enabled = false
 rynk_enabled = false
@@ -53,7 +54,7 @@ col_offset = 6
 row_pins = ["P0_10", "P0_09", "P1_01", "P0_19", "P0_15"]
 col_pins = ["P1_11", "P0_04", "P0_29", "P0_28", "P0_03", "P0_02"]
 
-# Left half = peripheral 0, columns 0..5.
+# Left half = peripheral 0, columns 0..5. Left trackball remains disabled in v4.
 [[split.peripheral]]
 rows = 5
 cols = 6
