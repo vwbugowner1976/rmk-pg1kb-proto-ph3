@@ -4,8 +4,11 @@ use defmt::{error, info, warn};
 use embassy_time::{Duration, Instant, Timer};
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal_async::spi::SpiBus;
-use rmk::event::{publish_event, Axis, AxisEvent, AxisValType, PointingEvent, PointingSetCpiEvent};
+use rmk::channel::USB_REPORT_CHANNEL;
+use rmk::event::PointingSetCpiEvent;
+use rmk::hid::Report;
 use rmk::macros::processor;
+use usbd_hid::descriptor::MouseReport;
 
 const PRODUCT_ID1: u8 = 0x00;
 const MOTION: u8 = 0x02;
@@ -51,27 +54,27 @@ pub enum Paw3222Error {
 
 /// PAW3222 transport/driver.
 ///
-/// The PG1KB uses a single bidirectional SDIO line, so the SPI bus passed here
-/// is RMK's `BitBangSpiBus` on nRF52. Chip select is kept separate because the
-/// bus itself only owns SCLK and SDIO.
-pub struct Paw3222<SPI, CS, MOTION_PIN> {
+/// PG1KB uses one bidirectional SDIO line. RMK's BitBangSpiBus switches that
+/// pin between output and input, while CS is managed here so a complete PAW3222
+/// register operation remains under one chip-select assertion.
+pub struct Paw3222<SPI, CS, MotionPin> {
     spi: SPI,
     cs: CS,
-    motion: MOTION_PIN,
+    motion: MotionPin,
     resolution_cpi: u16,
     force_awake: bool,
 }
 
-impl<SPI, CS, MOTION_PIN> Paw3222<SPI, CS, MOTION_PIN>
+impl<SPI, CS, MotionPin> Paw3222<SPI, CS, MotionPin>
 where
     SPI: SpiBus,
     CS: OutputPin,
-    MOTION_PIN: InputPin,
+    MotionPin: InputPin,
 {
     pub fn new(
         spi: SPI,
         mut cs: CS,
-        motion: MOTION_PIN,
+        motion: MotionPin,
         resolution_cpi: u16,
         force_awake: bool,
     ) -> Self {
@@ -146,9 +149,8 @@ where
     }
 
     pub async fn read_delta(&mut self) -> Result<MotionDelta, Paw3222Error> {
-        // Reproduce the working ZMK sequence under one CS assertion:
-        //   DELTA_X -> byte, DELTA_Y -> byte, DELTA_XY_HI -> byte.
-        // The RMK bitbang bus changes SDIO direction between write() and read().
+        // Reproduce the working ZMK register sequence under one CS assertion:
+        // DELTA_X -> byte, DELTA_Y -> byte, DELTA_XY_HI -> byte.
         self.cs.set_low().map_err(|_| Paw3222Error::Spi)?;
 
         let result = async {
@@ -258,14 +260,16 @@ where
 
 /// Central-side bring-up processor for PG1KB's right PAW3222.
 ///
-/// The processor polls the active-low MOTION pin every 1 ms, accumulates raw
-/// deltas, and publishes at most one PointingEvent every 8 ms (125 Hz). This is
-/// intentionally the same report-rate ceiling RMK uses for its built-in
-/// pointing devices to avoid flooding BLE/event queues.
+/// During this first hardware bring-up, reports are written directly to RMK's
+/// public USB HID report channel. RMK's config-macro initializes custom
+/// `#[register_processor]` instances before it creates `keymap`, so a custom
+/// processor cannot construct the stock `PointingProcessor` there. Once the
+/// sensor path is proven, this temporary USB-only bridge will be replaced by a
+/// proper PointingDevice/PointingProcessor integration for USB + BLE.
 #[processor(subscribe = [PointingSetCpiEvent], poll_interval = 1)]
-pub struct Paw3222Processor<SPI: SpiBus, CS: OutputPin, MOTION_PIN: InputPin> {
+pub struct Paw3222Processor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> {
     id: u8,
-    sensor: Paw3222<SPI, CS, MOTION_PIN>,
+    sensor: Paw3222<SPI, CS, MotionPin>,
     init_attempted: bool,
     ready: bool,
     accumulated_x: i32,
@@ -273,12 +277,12 @@ pub struct Paw3222Processor<SPI: SpiBus, CS: OutputPin, MOTION_PIN: InputPin> {
     last_report: Instant,
 }
 
-impl<SPI: SpiBus, CS: OutputPin, MOTION_PIN: InputPin> Paw3222Processor<SPI, CS, MOTION_PIN> {
+impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222Processor<SPI, CS, MotionPin> {
     pub fn new(
         id: u8,
         spi: SPI,
         cs: CS,
-        motion: MOTION_PIN,
+        motion: MotionPin,
         resolution_cpi: u16,
         force_awake: bool,
     ) -> Self {
@@ -336,36 +340,24 @@ impl<SPI: SpiBus, CS: OutputPin, MOTION_PIN: InputPin> Paw3222Processor<SPI, CS,
             return;
         }
 
-        let x = self
-            .accumulated_x
-            .clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-        let y = self
-            .accumulated_y
-            .clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-        self.accumulated_x = 0;
-        self.accumulated_y = 0;
-        self.last_report = Instant::now();
+        // MouseReport uses signed 8-bit X/Y. Keep any excess in the accumulator
+        // so fast motion is emitted over subsequent reports instead of discarded.
+        let x = self.accumulated_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let y = self.accumulated_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
 
-        publish_event(PointingEvent {
-            device_id: self.id,
-            axes: [
-                AxisEvent {
-                    typ: AxisValType::Rel,
-                    axis: Axis::X,
-                    value: x,
-                },
-                AxisEvent {
-                    typ: AxisValType::Rel,
-                    axis: Axis::Y,
-                    value: y,
-                },
-                AxisEvent {
-                    typ: AxisValType::Rel,
-                    axis: Axis::Z,
-                    value: 0,
-                },
-            ],
+        let report = Report::MouseReport(MouseReport {
+            buttons: 0,
+            x,
+            y,
+            wheel: 0,
+            pan: 0,
         });
+
+        if USB_REPORT_CHANNEL.try_send(report).is_ok() {
+            self.accumulated_x -= x as i32;
+            self.accumulated_y -= y as i32;
+            self.last_report = Instant::now();
+        }
     }
 
     async fn on_pointing_set_cpi_event(&mut self, event: PointingSetCpiEvent) {
