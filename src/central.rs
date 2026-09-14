@@ -3,6 +3,8 @@
 
 mod paw3222;
 mod paw3222_ble;
+mod runtime;
+mod split_pointing_ble;
 
 use rmk::macros::rmk_central;
 
@@ -22,12 +24,17 @@ mod keyboard_central {
         let spi = BitBangSpiBus::new(sck, sdio);
 
         crate::paw3222_ble::Paw3222BleProcessor::new(
-            0,     // right/central pointing device id
+            crate::runtime::RIGHT_TRACKBALL_ID,
             spi,
             cs,
             motion,
-            1178,  // current PG1KB CPI (31 * 38)
-            false, // match existing ZMK power-saving behavior initially
+            crate::runtime::DEFAULT_CPI,
+            false,
         )
+    }
+
+    #[register_processor(event)]
+    fn left_split_pointing() -> crate::split_pointing_ble::SplitPointingBleProcessor {
+        crate::split_pointing_ble::SplitPointingBleProcessor::new(crate::runtime::LEFT_TRACKBALL_ID)
     }
 }
