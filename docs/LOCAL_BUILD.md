@@ -207,11 +207,13 @@ rmk-pg1kb-proto-ph3-central.uf2
 rmk-pg1kb-proto-ph3-peripheral.uf2
 ```
 
-## 7. Optional: copy UF2 files to the Windows D: drive
+## 7. Optional: copy UF2 files to Windows
+
+Use `D:\rmk-firmware` as the standard Windows-side output folder for this RMK project.
 
 ```bash
-mkdir -p /mnt/d/ZMK-Firmware/rmk-builds
-cp -v rmk-pg1kb-proto-ph3-*.uf2 /mnt/d/ZMK-Firmware/rmk-builds/
+mkdir -p /mnt/d/rmk-firmware
+cp -v rmk-pg1kb-proto-ph3-*.uf2 /mnt/d/rmk-firmware/
 ```
 
 ## Fast edit/build loop
@@ -246,8 +248,8 @@ When the build succeeds:
 
 ```bash
 cargo make uf2-central --release
-mkdir -p /mnt/d/ZMK-Firmware/rmk-builds
-cp -v rmk-pg1kb-proto-ph3-central.uf2 /mnt/d/ZMK-Firmware/rmk-builds/
+mkdir -p /mnt/d/rmk-firmware
+cp -v rmk-pg1kb-proto-ph3-central.uf2 /mnt/d/rmk-firmware/
 ```
 
 For a full two-half verification:
