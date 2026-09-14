@@ -9,7 +9,10 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-rmk = { version = "0.9", default-features = false, features = [
+# v3 BLE/keyboard bring-up uses t-ogura's PAW3222 RMK PR so the sensor runs
+# through RMK's native PointingDevice/PointingProcessor transport routing.
+# v1/v2 remain available on their branches as the known-working USB reference.
+rmk = { git = "https://github.com/t-ogura/rmk", branch = "pr/paw3222", default-features = false, features = [
     "storage",
     "watchdog",
     "nrf52840_ble",
