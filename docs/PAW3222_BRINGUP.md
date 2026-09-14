@@ -20,13 +20,10 @@ RMK BitBangSpiBus (half-duplex SDIO)
 Paw3222Processor (device_id 0)
        |
        v
-PointingEvent @ max 125 Hz
+USB_REPORT_CHANNEL @ max 125 Hz
        |
        v
-PointingProcessor
-       |
-       v
-USB / BLE mouse HID
+USB mouse HID
 ```
 
 The existing working ZMK PAW3222 driver remains the behavioral reference.
@@ -35,16 +32,30 @@ The existing working ZMK PAW3222 driver remains the behavioral reference.
 
 RMK already contains a GPIO bit-banged SPI implementation specifically for sensors using a single bidirectional SDIO line. It switches SDIO between output and input and keeps SCLK idle high, which matches the existing PG1KB PAW3222 wiring and avoids needing a custom nRF SPIM workaround for the first bring-up.
 
+## Temporary USB-only bring-up path
+
+RMK 0.9's config macro initializes custom `#[register_processor]` instances before it creates the runtime `keymap`. The stock `PointingProcessor::new()` needs `&keymap`, so it cannot be constructed from the same custom processor initializer used for the PAW3222 sensor.
+
+For the first hardware test, `Paw3222Processor` therefore sends `MouseReport` directly to RMK's public `USB_REPORT_CHANNEL`. This is intentionally temporary and is only used to prove:
+
+1. PAW3222 transport
+2. Product ID
+3. MOTION handling
+4. 12-bit X/Y decoding
+5. USB cursor motion
+
+After USB motion is proven, the driver will be integrated through the normal RMK PointingDevice / PointingProcessor path so USB and BLE share the normal active-transport routing.
+
 ## Initial settings
 
 - Right PAW3222 device ID: `0`
 - CPI: `1178` (`31 * 38`)
 - Force awake: `false` initially, matching the existing ZMK power-saving behavior
 - Processor poll interval: `1 ms`
-- HID pointing event ceiling: `8 ms` / `125 Hz`
+- USB report ceiling: `8 ms` / `125 Hz`
 - MOTION pin is active low
 
-The 125 Hz output limit follows RMK's built-in pointing-device design. RMK documents this as a way to avoid flooding the event channel, especially over BLE.
+Fast motion that exceeds the signed 8-bit HID X/Y range is kept in the accumulator and emitted over following reports instead of being discarded.
 
 ## Build
 
@@ -77,10 +88,10 @@ Expected sequence:
 2. PAW3222 Product ID `0x30` is detected.
 3. Moving the right ball asserts MOTION low.
 4. Signed 12-bit X/Y deltas are read.
-5. RMK publishes `PointingEvent` for device ID 0.
-6. The default `PointingProcessor` converts this into mouse movement.
-7. Cursor movement is verified over USB first.
-8. BLE cursor feel is compared with the existing ZMK firmware after USB works.
+5. The bring-up processor emits USB mouse reports at up to 125 Hz.
+6. Cursor movement is verified over USB.
+
+BLE comparison comes after this temporary USB path is proven and replaced by normal RMK pointing integration.
 
 ## If Product ID is not 0x30
 
@@ -103,8 +114,7 @@ Check in this order:
 2. MOTION register bit 7 is set.
 3. DELTA_X / DELTA_Y / DELTA_XY_HI return changing values.
 4. 12-bit sign extension is correct.
-5. `PointingEvent` is published.
-6. The central `PointingProcessor` is running for `device_id = 0`.
+5. USB mouse reports are reaching `USB_REPORT_CHANNEL`.
 
 Do not add scroll/inertia/layer transforms until raw cursor motion is confirmed.
 
@@ -112,9 +122,10 @@ Do not add scroll/inertia/layer transforms until raw cursor motion is confirmed.
 
 After right USB cursor movement works:
 
-1. Compare right cursor smoothness over BLE against ZMK.
-2. Tune report/poll timing only if required.
-3. Add the left/peripheral PAW3222 with a distinct `device_id = 1`.
-4. Confirm split forwarding preserves device IDs.
-5. Restore PG1KB layer-dependent cursor/scroll transforms.
-6. Recreate inertia only after the raw pointing path is stable.
+1. Replace the temporary USB-only report bridge with normal RMK PointingDevice / PointingProcessor integration.
+2. Compare right cursor smoothness over BLE against ZMK.
+3. Tune report/poll timing only if required.
+4. Add the left/peripheral PAW3222 with a distinct `device_id = 1`.
+5. Confirm split forwarding preserves device IDs.
+6. Restore PG1KB layer-dependent cursor/scroll transforms.
+7. Recreate inertia only after the raw pointing path is stable.
