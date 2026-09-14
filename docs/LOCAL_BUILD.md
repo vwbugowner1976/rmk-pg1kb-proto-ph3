@@ -95,10 +95,43 @@ sudo apt install -y \
   libssl-dev \
   git \
   curl \
-  gcc-arm-none-eabi
+  gcc-arm-none-eabi \
+  clang \
+  libclang-dev
 ```
 
 `gcc-arm-none-eabi` is required by RMK's nRF52 BLE build for the optimized P-256 assembly used during pairing.
+
+`clang` / `libclang-dev` are required by Rust `bindgen`, which is used by the Nordic `nrf-mpsl-sys` and `nrf-sdc-sys` crates. Without them the build can fail with an error such as:
+
+```text
+Unable to find libclang: couldn't find any valid shared libraries matching libclang.so...
+```
+
+If that error appears, install the packages and rebuild:
+
+```bash
+sudo apt update
+sudo apt install -y clang libclang-dev
+
+cd ~/rmk-dev/rmk-pg1kb-proto-ph3
+cargo build --release --bin central
+```
+
+Normally `LIBCLANG_PATH` does not need to be set on Ubuntu/WSL after installing `libclang-dev`. If bindgen still cannot locate it, find the installed library with:
+
+```bash
+find /usr/lib -name 'libclang.so*' -o -name 'libclang-*.so*' 2>/dev/null
+```
+
+Then temporarily point bindgen at the directory containing the library, for example:
+
+```bash
+export LIBCLANG_PATH=/usr/lib/llvm-18/lib
+cargo build --release --bin central
+```
+
+Use the actual directory returned by `find`; the LLVM version can differ by Ubuntu release.
 
 ## 2. Install Rust
 
