@@ -1,5 +1,7 @@
 [keyboard]
-name = "PG1KB Proto PH3"
+# RMK legacy BLE advertisements allow at most 16 bytes for the local name.
+# Keep this short so host advertising fits in the 31-byte payload.
+name = "PG1KB-PH3"
 product_name = "PG1KB Proto PH3 RMK"
 vendor_id = 0x4c4b
 product_id = 0x4643
@@ -20,21 +22,23 @@ map = """
 [keymap]
 layers = 1
 
+# Bring-up map only. The left half remains disabled. The right/central 5x6
+# matrix gets simple, easy-to-identify keycodes so we can stress keyboard +
+# pointing over BLE before porting the final ZMK layers/combos.
 [[keymap.layer]]
 name = "Base"
 keys = """
-No No No No No No No No No No No No
-No No No No No No No No No No No No
-No No No No No No No No No No No No
-No No No No No No No No No No No No
-No No No No No No No No No No No No
+No No No No No No Y U I O P Enter
+No No No No No No H J K L A B
+No No No No No No N M C D E F
+No No No No No No N1 N2 N3 N4 N5 N6
+No No No No No No F1 F2 F3 F4 F5 F6
 """
 
 [ble]
 enabled = true
 
-# Host configurator protocols are intentionally disabled during initial bring-up.
-# These values must match the RMK Cargo features. Vial defaults to true when omitted.
+# Host configurator protocols are intentionally disabled during bring-up.
 [host]
 vial_enabled = false
 rynk_enabled = false
@@ -53,7 +57,29 @@ col_offset = 6
 row_pins = ["P0_10", "P0_09", "P1_01", "P0_19", "P0_15"]
 col_pins = ["P1_11", "P0_04", "P0_29", "P0_28", "P0_03", "P0_02"]
 
-# Left half = peripheral 0, columns 0..5.
+# Right PAW3222. This uses the native RMK PAW3222 PR implementation so
+# PointingDevice -> PointingProcessor -> active USB/BLE transport is shared
+# with normal keyboard reports.
+[[split.central.input_device.paw3222]]
+name = "right_trackball"
+id = 0
+spi.instance = "bitbang0"
+spi.sck = "P1_05"
+spi.mosi = "P1_07"
+spi.miso = "P1_07"
+spi.cs = "P1_03"
+motion = "P1_15"
+report_hz = 125
+force_awake = false
+cpi = 1178
+
+# Right cursor has no software transform in the existing ZMK behavior.
+proc_invert_x = false
+proc_invert_y = false
+proc_swap_xy = false
+
+# Left half = peripheral 0, columns 0..5. Its trackball is intentionally not
+# enabled in this milestone.
 [[split.peripheral]]
 rows = 5
 cols = 6
