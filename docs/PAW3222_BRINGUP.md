@@ -19,6 +19,8 @@ RMK BitBangSpiBus (half-duplex SDIO)
        v
 Paw3222Processor (device_id 0)
        |
+       +--> RMK usb_log CDC ACM diagnostics (v2 branch)
+       |
        v
 USB_REPORT_CHANNEL @ max 125 Hz
        |
@@ -28,9 +30,78 @@ USB mouse HID
 
 The existing working ZMK PAW3222 driver remains the behavioral reference.
 
+## Verified status
+
+### 2026-09-14: v1 central build / UF2
+
+The PAW3222-enabled central firmware compiled successfully on the local WSL environment and the UF2 was generated and copied to Windows.
+
+- `cargo build --release --bin central`: **SUCCESS**
+- `cargo make uf2-central --release`: **SUCCESS**
+- Output size: about 805 KiB
+- WSL -> Windows copy: **SUCCESS**
+- SHA-256 on both sides:
+  `69f1ae183e3ba5eaa54a75676cc758629a705932b2cdb8b611fc92845ba621b0`
+- Hardware sensor behavior: **NOT YET VERIFIED**
+- USB cursor behavior: **NOT YET VERIFIED**
+
+Do not describe the PAW3222 sensor path as hardware-confirmed until the right central is flashed and tested.
+
+## v2 diagnostic branch
+
+Branch: `paw3222-v2-bringup`
+
+This branch is prepared for the next hardware test. It is intentionally separate from `main`.
+
+Changes relative to the first bring-up version:
+
+1. Enable RMK 0.9's official `usb_log` feature, which exposes logging as a USB CDC ACM serial port.
+2. Change PAW3222 bring-up messages to the `log` crate so they are visible over USB.
+3. Explicitly enable `MOUSE_OPTION` bit 2 (`XY12bit_Enh`) after reset.
+4. Read `MOUSE_OPTION` back and only decode 12-bit deltas when the bit is confirmed set; otherwise fall back to signed 8-bit deltas.
+5. Keep the known-working PG1KB/ZMK delta sequence: `DELTA_X`, `DELTA_Y`, `DELTA_XY_HI` while CS remains asserted.
+6. Add a one-second diagnostic heartbeat so useful state is still visible even though USB logging cannot capture early boot messages before the serial port is opened.
+7. Count sensor reads, motion events, successful USB HID reports, busy HID-channel attempts and motion-read errors.
+
+The diagnostic heartbeat includes values similar to:
+
+```text
+PAW3222 diag ready=true init_error=None pid=0x30 12bit=true mouse_opt=0x04 motion_pin=false motion_reg=0x00 reads=123 events=120 last_dx=4 last_dy=-2 accum_x=0 accum_y=0 hid=118 hid_busy=0 read_err=0
+```
+
+**Important:** the v2 branch has been prepared in GitHub but has not yet been locally compiled or tested on hardware. Compile success must be recorded only after running the local build.
+
+## USB logging on Windows
+
+RMK's `usb_log` feature uses a CDC ACM serial interface alongside the keyboard/mouse USB interfaces. Boot-stage messages may be lost because the serial port is not open yet; the v2 one-second heartbeat solves this for PAW3222 bring-up.
+
+A helper script is included:
+
+```text
+scripts/read_usb_log.py
+```
+
+On Windows:
+
+```powershell
+cd D:\path\to\rmk-pg1kb-proto-ph3
+py -m pip install pyserial
+py scripts\read_usb_log.py
+```
+
+The first run lists COM ports. Then run it again with the keyboard's logging port, for example:
+
+```powershell
+py scripts\read_usb_log.py COM7
+```
+
+The baud rate value is not meaningful for USB CDC, but the helper opens the port at 115200 for compatibility with serial APIs.
+
 ## Why RMK BitBangSpiBus is used
 
 RMK already contains a GPIO bit-banged SPI implementation specifically for sensors using a single bidirectional SDIO line. It switches SDIO between output and input and keeps SCLK idle high, which matches the existing PG1KB PAW3222 wiring and avoids needing a custom nRF SPIM workaround for the first bring-up.
+
+The upstream RMK PAW3222 proposal also changes BitBangSpiBus timing and samples SDIO before the rising SCLK edge. That change is not copied into PG1KB v2 yet. If Product ID works but motion data is corrupted or drops at speed, the BitBangSpiBus sampling position is a high-priority comparison point.
 
 ## Temporary USB-only bring-up path
 
@@ -54,28 +125,28 @@ After USB motion is proven, the driver will be integrated through the normal RMK
 - Processor poll interval: `1 ms`
 - USB report ceiling: `8 ms` / `125 Hz`
 - MOTION pin is active low
+- v2 diagnostic heartbeat: `1 s`
 
 Fast motion that exceeds the signed 8-bit HID X/Y range is kept in the accumulator and emitted over following reports instead of being discarded.
 
-## Build
+## Build v2 locally
 
 ```bash
 cd ~/rmk-dev/rmk-pg1kb-proto-ph3
+git fetch origin
+git switch paw3222-v2-bringup
 git pull --ff-only
 cargo build --release --bin central
 ```
 
-If the build succeeds:
+Only after that succeeds:
 
 ```bash
 cargo make uf2-central --release
-```
-
-Copy to Windows:
-
-```bash
 mkdir -p /mnt/d/rmk-firmware
 cp -v rmk-pg1kb-proto-ph3-central.uf2 /mnt/d/rmk-firmware/
+sha256sum rmk-pg1kb-proto-ph3-central.uf2
+sha256sum /mnt/d/rmk-firmware/rmk-pg1kb-proto-ph3-central.uf2
 ```
 
 ## First hardware test
@@ -84,18 +155,22 @@ Flash only the right/central XIAO first.
 
 Expected sequence:
 
-1. Firmware boots.
-2. PAW3222 Product ID `0x30` is detected.
-3. Moving the right ball asserts MOTION low.
-4. Signed 12-bit X/Y deltas are read.
-5. The bring-up processor emits USB mouse reports at up to 125 Hz.
-6. Cursor movement is verified over USB.
+1. Firmware boots and Windows enumerates the keyboard/mouse plus a CDC logging COM port.
+2. Open the CDC port with `scripts/read_usb_log.py`.
+3. The one-second heartbeat reports Product ID and initialization state.
+4. PAW3222 Product ID should be `0x30`.
+5. `12bit=true` and `mouse_opt` bit 2 should be set if 12-bit setup succeeds.
+6. Moving the right ball should assert MOTION low and increase `reads` / `events`.
+7. `last_dx` / `last_dy` should change.
+8. `hid` should increase and the Windows cursor should move.
 
 BLE comparison comes after this temporary USB path is proven and replaced by normal RMK pointing integration.
 
-## If Product ID is not 0x30
+## Diagnostic interpretation
 
-Do not change CPI or transforms yet. First verify only the transport:
+### PID is not 0x30
+
+Do not change CPI or transforms. Verify only the transport and wiring:
 
 - SCLK = P1.05
 - SDIO = P1.07
@@ -104,27 +179,31 @@ Do not change CPI or transforms yet. First verify only the transport:
 - sensor power / ground
 - bitbang read direction switching
 
-The current driver retries Product ID reads up to 10 times with 100 ms between attempts, matching the existing ZMK driver's startup strategy.
+The driver retries Product ID reads up to 10 times with 100 ms between attempts, matching the existing ZMK startup strategy.
 
-## If Product ID works but cursor does not move
+### PID = 0x30, but `motion_pin` never becomes active
 
-Check in this order:
+Suspect the P1.15 MOTION path, pull-up, pin mapping or sensor interrupt behavior before changing the delta decoder.
 
-1. MOTION pin goes low while moving the ball.
-2. MOTION register bit 7 is set.
-3. DELTA_X / DELTA_Y / DELTA_XY_HI return changing values.
-4. 12-bit sign extension is correct.
-5. USB mouse reports are reaching `USB_REPORT_CHANNEL`.
+### `motion_pin` reacts but `events` / deltas are wrong
 
-Do not add scroll/inertia/layer transforms until raw cursor motion is confirmed.
+Check the MOTION register and the CS-held delta sequence. If data corruption appears mostly during faster movement, compare RMK's current BitBangSpiBus sampling timing with the upstream PAW3222 proposal.
+
+### Deltas change but `hid` does not increase
+
+The sensor path is working and the problem is at or after `USB_REPORT_CHANNEL`. `hid_busy` indicates failed `try_send` attempts.
+
+### `hid` increases but the cursor does not move
+
+Focus on USB HID enumeration/report routing rather than the PAW3222 transport.
 
 ## Next milestones
 
 After right USB cursor movement works:
 
-1. Replace the temporary USB-only report bridge with normal RMK PointingDevice / PointingProcessor integration.
+1. Replace the temporary USB-only report bridge with normal RMK PointingDevice / PointingProcessor integration, using the upstream RMK PAW3222 work as a reference.
 2. Compare right cursor smoothness over BLE against ZMK.
-3. Tune report/poll timing only if required.
+3. Separate sensor polling cadence from HID reporting cadence and compare timings.
 4. Add the left/peripheral PAW3222 with a distinct `device_id = 1`.
 5. Confirm split forwarding preserves device IDs.
 6. Restore PG1KB layer-dependent cursor/scroll transforms.
