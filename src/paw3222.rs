@@ -1,7 +1,11 @@
 #![allow(dead_code)]
 
-use embassy_time::{Duration, Timer};
-use embedded_hal_async::spi::SpiDevice;
+use defmt::{error, info, warn};
+use embassy_time::{Duration, Instant, Timer};
+use embedded_hal::digital::{InputPin, OutputPin};
+use embedded_hal_async::spi::SpiBus;
+use rmk::event::{publish_event, Axis, AxisEvent, AxisValType, PointingEvent, PointingSetCpiEvent};
+use rmk::macros::processor;
 
 const PRODUCT_ID1: u8 = 0x00;
 const MOTION: u8 = 0x02;
@@ -25,9 +29,12 @@ const WRITE_PROTECT_ENABLE: u8 = 0x00;
 const WRITE_PROTECT_DISABLE: u8 = 0x5a;
 
 const RESET_DELAY_MS: u64 = 2;
+const PRODUCT_ID_RETRIES: u8 = 10;
+const PRODUCT_ID_RETRY_MS: u64 = 100;
 const RES_STEP: u16 = 38;
 const RES_MIN: u16 = 16 * RES_STEP;
 const RES_MAX: u16 = 127 * RES_STEP;
+const REPORT_INTERVAL_MS: u64 = 8; // 125 Hz
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MotionDelta {
@@ -35,39 +42,82 @@ pub struct MotionDelta {
     pub y: i16,
 }
 
-#[derive(Debug)]
-pub enum Paw3222Error<E> {
-    Bus(E),
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Paw3222Error {
+    Spi,
     InvalidProductId(u8),
     InvalidResolution(u16),
 }
 
-pub struct Paw3222<SPI> {
+/// PAW3222 transport/driver.
+///
+/// The PG1KB uses a single bidirectional SDIO line, so the SPI bus passed here
+/// is RMK's `BitBangSpiBus` on nRF52. Chip select is kept separate because the
+/// bus itself only owns SCLK and SDIO.
+pub struct Paw3222<SPI, CS, MOTION_PIN> {
     spi: SPI,
+    cs: CS,
+    motion: MOTION_PIN,
     resolution_cpi: u16,
     force_awake: bool,
 }
 
-impl<SPI> Paw3222<SPI>
+impl<SPI, CS, MOTION_PIN> Paw3222<SPI, CS, MOTION_PIN>
 where
-    SPI: SpiDevice<u8>,
+    SPI: SpiBus,
+    CS: OutputPin,
+    MOTION_PIN: InputPin,
 {
-    pub fn new(spi: SPI, resolution_cpi: u16, force_awake: bool) -> Self {
+    pub fn new(
+        spi: SPI,
+        mut cs: CS,
+        motion: MOTION_PIN,
+        resolution_cpi: u16,
+        force_awake: bool,
+    ) -> Self {
+        let _ = cs.set_high();
         Self {
             spi,
+            cs,
+            motion,
             resolution_cpi,
             force_awake,
         }
     }
 
-    pub fn release(self) -> SPI {
-        self.spi
+    pub fn motion_pin_active(&mut self) -> bool {
+        self.motion.is_low().unwrap_or(false)
     }
 
-    pub async fn configure(&mut self) -> Result<(), Paw3222Error<SPI::Error>> {
-        let product_id = self.read_reg(PRODUCT_ID1).await?;
-        if product_id != PRODUCT_ID_PAW3222 {
-            return Err(Paw3222Error::InvalidProductId(product_id));
+    pub async fn configure(&mut self) -> Result<(), Paw3222Error> {
+        let mut last_id = 0u8;
+        let mut detected = false;
+
+        for attempt in 0..PRODUCT_ID_RETRIES {
+            match self.read_reg(PRODUCT_ID1).await {
+                Ok(id) => {
+                    last_id = id;
+                    if id == PRODUCT_ID_PAW3222 {
+                        detected = true;
+                        info!("PAW3222 detected, product ID={=u8:#04x}", id);
+                        break;
+                    }
+                    warn!(
+                        "PAW3222 unexpected product ID={=u8:#04x}, attempt {=u8}",
+                        id,
+                        attempt + 1
+                    );
+                }
+                Err(_) => {
+                    warn!("PAW3222 product ID read failed, attempt {=u8}", attempt + 1);
+                }
+            }
+
+            Timer::after(Duration::from_millis(PRODUCT_ID_RETRY_MS)).await;
+        }
+
+        if !detected {
+            return Err(Paw3222Error::InvalidProductId(last_id));
         }
 
         self.update_reg(CONFIGURATION, CONFIGURATION_RESET, CONFIGURATION_RESET)
@@ -77,7 +127,7 @@ where
         self.set_resolution(self.resolution_cpi).await?;
         self.set_force_awake(self.force_awake).await?;
 
-        // Match the existing ZMK driver: clear stale motion data after reset.
+        // Match the working ZMK driver: clear stale motion state after reset.
         let _ = self.read_reg(MOTION).await?;
         let _ = self.read_reg(DELTA_X).await?;
         let _ = self.read_reg(DELTA_Y).await?;
@@ -86,33 +136,53 @@ where
         Ok(())
     }
 
-    pub async fn motion_detected(&mut self) -> Result<bool, Paw3222Error<SPI::Error>> {
-        Ok(self.read_reg(MOTION).await? & MOTION_STATUS_MOTION != 0)
+    pub async fn read_motion(&mut self) -> Result<Option<MotionDelta>, Paw3222Error> {
+        let motion = self.read_reg(MOTION).await?;
+        if motion & MOTION_STATUS_MOTION == 0 {
+            return Ok(None);
+        }
+
+        self.read_delta().await.map(Some)
     }
 
-    pub async fn read_delta(&mut self) -> Result<MotionDelta, Paw3222Error<SPI::Error>> {
-        // The PAW3222 returns three 12-bit values through an interleaved SPI read.
-        // DELTA_XY_HI lower nibble = X[11:8], upper nibble = Y[11:8].
-        let tx = [DELTA_X, 0xff, DELTA_Y, 0xff, DELTA_XY_HI, 0xff];
-        let mut rx = [0u8; 6];
-        self.spi
-            .transfer(&mut rx, &tx)
-            .await
-            .map_err(Paw3222Error::Bus)?;
+    pub async fn read_delta(&mut self) -> Result<MotionDelta, Paw3222Error> {
+        // Reproduce the working ZMK sequence under one CS assertion:
+        //   DELTA_X -> byte, DELTA_Y -> byte, DELTA_XY_HI -> byte.
+        // The RMK bitbang bus changes SDIO direction between write() and read().
+        self.cs.set_low().map_err(|_| Paw3222Error::Spi)?;
 
-        let x_raw = (((rx[5] as u16) << 4) & 0x0f00) | rx[1] as u16;
-        let y_raw = (((rx[5] as u16) << 8) & 0x0f00) | rx[3] as u16;
+        let result = async {
+            let mut x_lo = [0u8; 1];
+            let mut y_lo = [0u8; 1];
+            let mut hi = [0u8; 1];
 
-        Ok(MotionDelta {
-            x: sign_extend_12(x_raw),
-            y: sign_extend_12(y_raw),
-        })
+            self.spi.write(&[DELTA_X]).await.map_err(|_| Paw3222Error::Spi)?;
+            self.spi.read(&mut x_lo).await.map_err(|_| Paw3222Error::Spi)?;
+
+            self.spi.write(&[DELTA_Y]).await.map_err(|_| Paw3222Error::Spi)?;
+            self.spi.read(&mut y_lo).await.map_err(|_| Paw3222Error::Spi)?;
+
+            self.spi
+                .write(&[DELTA_XY_HI])
+                .await
+                .map_err(|_| Paw3222Error::Spi)?;
+            self.spi.read(&mut hi).await.map_err(|_| Paw3222Error::Spi)?;
+
+            let x_raw = (((hi[0] as u16) << 4) & 0x0f00) | x_lo[0] as u16;
+            let y_raw = (((hi[0] as u16) << 8) & 0x0f00) | y_lo[0] as u16;
+
+            Ok(MotionDelta {
+                x: sign_extend_12(x_raw),
+                y: sign_extend_12(y_raw),
+            })
+        }
+        .await;
+
+        let _ = self.cs.set_high();
+        result
     }
 
-    pub async fn set_resolution(
-        &mut self,
-        resolution_cpi: u16,
-    ) -> Result<(), Paw3222Error<SPI::Error>> {
+    pub async fn set_resolution(&mut self, resolution_cpi: u16) -> Result<(), Paw3222Error> {
         if !(RES_MIN..=RES_MAX).contains(&resolution_cpi) {
             return Err(Paw3222Error::InvalidResolution(resolution_cpi));
         }
@@ -128,10 +198,7 @@ where
         Ok(())
     }
 
-    pub async fn set_force_awake(
-        &mut self,
-        enable: bool,
-    ) -> Result<(), Paw3222Error<SPI::Error>> {
+    pub async fn set_force_awake(&mut self, enable: bool) -> Result<(), Paw3222Error> {
         let value = if enable { 0 } else { OPERATION_MODE_SLP_MASK };
 
         self.write_reg(WRITE_PROTECT, WRITE_PROTECT_DISABLE).await?;
@@ -143,25 +210,38 @@ where
         Ok(())
     }
 
-    async fn read_reg(&mut self, address: u8) -> Result<u8, Paw3222Error<SPI::Error>> {
-        let tx = [address, 0xff];
-        let mut rx = [0u8; 2];
-        self.spi
-            .transfer(&mut rx, &tx)
-            .await
-            .map_err(Paw3222Error::Bus)?;
-        Ok(rx[1])
+    async fn read_reg(&mut self, address: u8) -> Result<u8, Paw3222Error> {
+        self.cs.set_low().map_err(|_| Paw3222Error::Spi)?;
+
+        let result = async {
+            self.spi
+                .write(&[address & 0x7f])
+                .await
+                .map_err(|_| Paw3222Error::Spi)?;
+            let mut value = [0u8; 1];
+            self.spi
+                .read(&mut value)
+                .await
+                .map_err(|_| Paw3222Error::Spi)?;
+            Ok(value[0])
+        }
+        .await;
+
+        let _ = self.cs.set_high();
+        result
     }
 
-    async fn write_reg(
-        &mut self,
-        address: u8,
-        value: u8,
-    ) -> Result<(), Paw3222Error<SPI::Error>> {
-        self.spi
+    async fn write_reg(&mut self, address: u8, value: u8) -> Result<(), Paw3222Error> {
+        self.cs.set_low().map_err(|_| Paw3222Error::Spi)?;
+
+        let result = self
+            .spi
             .write(&[address | SPI_WRITE, value])
             .await
-            .map_err(Paw3222Error::Bus)
+            .map_err(|_| Paw3222Error::Spi);
+
+        let _ = self.cs.set_high();
+        result
     }
 
     async fn update_reg(
@@ -169,12 +249,146 @@ where
         address: u8,
         mask: u8,
         value: u8,
-    ) -> Result<(), Paw3222Error<SPI::Error>> {
+    ) -> Result<(), Paw3222Error> {
         let current = self.read_reg(address).await?;
         self.write_reg(address, (current & !mask) | (value & mask))
             .await
     }
 }
+
+/// Central-side bring-up processor for PG1KB's right PAW3222.
+///
+/// The processor polls the active-low MOTION pin every 1 ms, accumulates raw
+/// deltas, and publishes at most one PointingEvent every 8 ms (125 Hz). This is
+/// intentionally the same report-rate ceiling RMK uses for its built-in
+/// pointing devices to avoid flooding BLE/event queues.
+#[processor(subscribe = [PointingSetCpiEvent], poll_interval = 1)]
+pub struct Paw3222Processor<SPI: SpiBus, CS: OutputPin, MOTION_PIN: InputPin> {
+    id: u8,
+    sensor: Paw3222<SPI, CS, MOTION_PIN>,
+    init_attempted: bool,
+    ready: bool,
+    accumulated_x: i32,
+    accumulated_y: i32,
+    last_report: Instant,
+}
+
+impl<SPI: SpiBus, CS: OutputPin, MOTION_PIN: InputPin> Paw3222Processor<SPI, CS, MOTION_PIN> {
+    pub fn new(
+        id: u8,
+        spi: SPI,
+        cs: CS,
+        motion: MOTION_PIN,
+        resolution_cpi: u16,
+        force_awake: bool,
+    ) -> Self {
+        Self {
+            id,
+            sensor: Paw3222::new(spi, cs, motion, resolution_cpi, force_awake),
+            init_attempted: false,
+            ready: false,
+            accumulated_x: 0,
+            accumulated_y: 0,
+            last_report: Instant::now(),
+        }
+    }
+
+    async fn poll(&mut self) {
+        if !self.init_attempted {
+            self.init_attempted = true;
+            match self.sensor.configure().await {
+                Ok(()) => {
+                    self.ready = true;
+                    self.last_report = Instant::now();
+                    info!("PAW3222 processor ready, device_id={=u8}", self.id);
+                }
+                Err(Paw3222Error::InvalidProductId(id)) => {
+                    error!("PAW3222 init failed, product ID={=u8:#04x}", id);
+                }
+                Err(_) => {
+                    error!("PAW3222 init failed");
+                }
+            }
+            return;
+        }
+
+        if !self.ready {
+            return;
+        }
+
+        if self.sensor.motion_pin_active() {
+            match self.sensor.read_motion().await {
+                Ok(Some(delta)) => {
+                    self.accumulated_x = self.accumulated_x.saturating_add(delta.x as i32);
+                    self.accumulated_y = self.accumulated_y.saturating_add(delta.y as i32);
+                }
+                Ok(None) => {}
+                Err(_) => warn!("PAW3222 motion read failed"),
+            }
+        }
+
+        if self.last_report.elapsed() < Duration::from_millis(REPORT_INTERVAL_MS) {
+            return;
+        }
+
+        if self.accumulated_x == 0 && self.accumulated_y == 0 {
+            self.last_report = Instant::now();
+            return;
+        }
+
+        let x = self
+            .accumulated_x
+            .clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        let y = self
+            .accumulated_y
+            .clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        self.accumulated_x = 0;
+        self.accumulated_y = 0;
+        self.last_report = Instant::now();
+
+        publish_event(PointingEvent {
+            device_id: self.id,
+            axes: [
+                AxisEvent {
+                    typ: AxisValType::Rel,
+                    axis: Axis::X,
+                    value: x,
+                },
+                AxisEvent {
+                    typ: AxisValType::Rel,
+                    axis: Axis::Y,
+                    value: y,
+                },
+                AxisEvent {
+                    typ: AxisValType::Rel,
+                    axis: Axis::Z,
+                    value: 0,
+                },
+            ],
+        });
+    }
+
+    async fn on_pointing_set_cpi_event(&mut self, event: PointingSetCpiEvent) {
+        if event.device_id != self.id || !self.ready {
+            return;
+        }
+
+        info!("PAW3222 set CPI {=u16}", event.cpi);
+        if self.sensor.set_resolution(event.cpi).await.is_err() {
+            warn!("PAW3222 set CPI failed");
+        }
+    }
+}
+
+/// Concrete nRF52840 type used by the config-macro initializer in central.rs.
+pub type NrfPaw3222Processor = Paw3222Processor<
+    rmk::driver::bitbang_spi::BitBangSpiBus<
+        embassy_nrf::gpio::Output<'static>,
+        embassy_nrf::gpio::Flex<'static>,
+    >,
+    embassy_nrf::gpio::Output<'static>,
+    embassy_nrf::gpio::Input<'static>,
+>;
 
 fn sign_extend_12(value: u16) -> i16 {
     ((value << 4) as i16) >> 4
