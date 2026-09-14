@@ -1,7 +1,7 @@
+use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use std::env;
 
 fn main() {
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
@@ -10,8 +10,9 @@ fn main() {
         .write_all(include_bytes!("memory.x"))
         .unwrap();
 
-    println!("cargo:rustc-link-search={}", out.display());
+    println!("cargo:rerun-if-changed=keyboard.toml");
     println!("cargo:rerun-if-changed=memory.x");
+    println!("cargo:rustc-link-search={}", out.display());
     println!("cargo:rustc-link-arg=--nmagic");
     println!("cargo:rustc-link-arg=-Tlink.x");
     println!("cargo:rustc-link-arg=-Tdefmt.x");
