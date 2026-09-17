@@ -9,6 +9,7 @@ fi
 
 python3 - "$RMK_ROOT" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 root = Path(sys.argv[1])
@@ -33,10 +34,13 @@ if marker not in s:
         raise SystemExit("storage signal anchor not found")
     s = s.replace(sig_anchor, sig_anchor + '''\n// PG1KB_TRACKBALL_STORAGE_V1\nstatic PG1KB_TRACKBALL_RESPONSE: Signal<crate::RawMutex, Option<[u8; 32]>> = Signal::new();\n\npub async fn pg1kb_read_trackball_config() -> Option<[u8; 32]> {\n    PG1KB_TRACKBALL_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::ReadPg1kbTrackballConfig).await;\n    PG1KB_TRACKBALL_RESPONSE.wait().await\n}\n\npub async fn pg1kb_write_trackball_config(data: [u8; 32]) -> bool {\n    FLASH_CHANNEL.send(FlashOperationMessage::Pg1kbTrackballConfig(data)).await;\n    flush().await\n}\n''', 1)
 
-    flush_variant = '    // Barrier: storage task replies via `FLUSHED` once every earlier message is processed.\n    Flush,\n'
-    if flush_variant not in s:
-        raise SystemExit("storage FlashOperationMessage anchor not found")
-    s = s.replace(flush_variant, '''    // PG1KB private persisted trackball settings.\n    Pg1kbTrackballConfig([u8; 32]),\n    ReadPg1kbTrackballConfig,\n''' + flush_variant, 1)
+    # RMK 0.9 snapshots differ in the comment immediately before Flush. Anchor
+    # on the enum variant itself instead of the comment text.
+    flush_match = re.search(r'(?m)^    Flush,\s*$', s)
+    if not flush_match:
+        raise SystemExit("storage FlashOperationMessage::Flush variant not found")
+    insertion = '''    // PG1KB private persisted trackball settings.\n    Pg1kbTrackballConfig([u8; 32]),\n    ReadPg1kbTrackballConfig,\n'''
+    s = s[:flush_match.start()] + insertion + s[flush_match.start():]
 
     key_anchor = '    #[cfg(feature = "_ble")]\n    BondInfo(u8),\n'
     if key_anchor not in s:
@@ -63,8 +67,6 @@ h = host.read_text()
 export_marker = "PG1KB_TRACKBALL_STORAGE_EXPORT_V1"
 if export_marker not in h:
     anchor = '#[cfg(feature = "storage")]\npub(crate) mod storage;\n'
-    # Newer RMK has host/storage.rs as a private module; if that exact anchor moved,
-    # insert before the HostService exports instead.
     insertion = '''\n// PG1KB_TRACKBALL_STORAGE_EXPORT_V1\n#[cfg(feature = "storage")]\npub use crate::storage::{pg1kb_read_trackball_config, pg1kb_write_trackball_config};\n'''
     if anchor in h:
         h = h.replace(anchor, anchor + insertion, 1)
