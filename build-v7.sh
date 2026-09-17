@@ -24,7 +24,7 @@ echo "=== SHA256 ==="
 sha256sum rmk-pg1kb-proto-ph3-central-v7.uf2
 sha256sum "$OUT/rmk-pg1kb-proto-ph3-central-v7.uf2"
 sha256sum rmk-pg1kb-proto-ph3-peripheral-v7.uf2
-sha256sum "$OUT/rmk-firmware/rmk-pg1kb-proto-ph3-peripheral-v7.uf2" 2>/dev/null || sha256sum "$OUT/rmk-pg1kb-proto-ph3-peripheral-v7.uf2"
+sha256sum "$OUT/rmk-pg1kb-proto-ph3-peripheral-v7.uf2"
 
 echo
 echo 'DONE:'
