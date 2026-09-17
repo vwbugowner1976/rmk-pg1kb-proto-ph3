@@ -9,11 +9,13 @@ use rmk::macros::processor;
 use usbd_hid::descriptor::MouseReport;
 
 use crate::paw3222::{MotionDelta, Paw3222, Paw3222Error};
-use crate::runtime;
+use crate::runtime::{self, TrackballMode};
 
 const REPORT_INTERVAL_MS: u64 = 8;
 const DIAG_INTERVAL_MS: u64 = 1000;
 const Q8_ONE: i32 = 256;
+const INERTIA_DIV: i32 = 16;
+const STOP_VELOCITY_Q8: i32 = 4;
 
 #[processor(subscribe = [PointingSetCpiEvent], poll_interval = 1)]
 pub struct Paw3222BleProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> {
@@ -24,6 +26,11 @@ pub struct Paw3222BleProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> 
     last_init_error: Option<Paw3222Error>,
     accumulated_x: i32,
     accumulated_y: i32,
+    wheel_accum_q8: i32,
+    velocity_q8: i32,
+    input_seen: bool,
+    direction: i8,
+    last_mode: u8,
     last_delta: MotionDelta,
     sensor_reads: u32,
     motion_events: u32,
@@ -35,14 +42,7 @@ pub struct Paw3222BleProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> 
 }
 
 impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, CS, MotionPin> {
-    pub fn new(
-        id: u8,
-        spi: SPI,
-        cs: CS,
-        motion: MotionPin,
-        resolution_cpi: u16,
-        force_awake: bool,
-    ) -> Self {
+    pub fn new(id: u8, spi: SPI, cs: CS, motion: MotionPin, resolution_cpi: u16, force_awake: bool) -> Self {
         Self {
             id,
             sensor: Paw3222::new(spi, cs, motion, resolution_cpi, force_awake),
@@ -51,6 +51,11 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             last_init_error: None,
             accumulated_x: 0,
             accumulated_y: 0,
+            wheel_accum_q8: 0,
+            velocity_q8: 0,
+            input_seen: false,
+            direction: 0,
+            last_mode: runtime::effective_mode(id) as u8,
             last_delta: MotionDelta::default(),
             sensor_reads: 0,
             motion_events: 0,
@@ -60,6 +65,24 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             last_report: Instant::now(),
             last_diag: Instant::now(),
         }
+    }
+
+    fn reset_motion_state(&mut self) {
+        self.accumulated_x = 0;
+        self.accumulated_y = 0;
+        self.wheel_accum_q8 = 0;
+        self.velocity_q8 = 0;
+        self.input_seen = false;
+        self.direction = 0;
+    }
+
+    fn sync_mode(&mut self) -> TrackballMode {
+        let mode = runtime::effective_mode(self.id);
+        if mode as u8 != self.last_mode {
+            self.reset_motion_state();
+            self.last_mode = mode as u8;
+        }
+        mode
     }
 
     async fn poll(&mut self) {
@@ -81,6 +104,8 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             return;
         }
 
+        self.sync_mode();
+
         if self.ready && self.sensor.motion_pin_active() {
             self.sensor_reads = self.sensor_reads.saturating_add(1);
             match self.sensor.read_motion().await {
@@ -89,6 +114,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
                     self.last_delta = delta;
                     self.accumulated_x = self.accumulated_x.saturating_add(delta.x as i32);
                     self.accumulated_y = self.accumulated_y.saturating_add(delta.y as i32);
+                    self.input_seen = true;
                 }
                 Ok(None) => {}
                 Err(_) => self.read_errors = self.read_errors.saturating_add(1),
@@ -96,13 +122,16 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         }
 
         if self.ready && self.last_report.elapsed() >= Duration::from_millis(REPORT_INTERVAL_MS) {
-            self.send_ble_report();
+            match self.sync_mode() {
+                TrackballMode::Cursor => self.send_cursor_report(),
+                TrackballMode::Scroll => self.send_scroll_report(),
+            }
         }
 
         self.emit_diag_if_due();
     }
 
-    fn send_ble_report(&mut self) {
+    fn send_cursor_report(&mut self) {
         if self.accumulated_x == 0 && self.accumulated_y == 0 {
             self.last_report = Instant::now();
             return;
@@ -110,32 +139,82 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
 
         let cfg = runtime::config(self.id);
         let (rot_x, rot_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
-        let gain_q8 = cfg.cursor_gain_q8() as i32;
+        let gain_q8 = runtime::effective_cursor_gain_q8(self.id) as i32;
         let scaled_x = rot_x.saturating_mul(gain_q8) / Q8_ONE;
         let scaled_y = rot_y.saturating_mul(gain_q8) / Q8_ONE;
-
         let x = scaled_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let y = scaled_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-
-        let report = Report::MouseReport(MouseReport {
-            buttons: 0,
-            x,
-            y,
-            wheel: 0,
-            pan: 0,
-        });
+        let report = Report::MouseReport(MouseReport { buttons: 0, x, y, wheel: 0, pan: 0 });
 
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
-            // Remove the amount represented by the report in raw sensor space.
-            // When clipping occurs keep the remainder for the next 8 ms report.
             if scaled_x.abs() <= i8::MAX as i32 && scaled_y.abs() <= i8::MAX as i32 {
                 self.accumulated_x = 0;
                 self.accumulated_y = 0;
             } else {
-                // Large bursts are rare; consume one report-sized fraction while preserving sign.
                 self.accumulated_x /= 2;
                 self.accumulated_y /= 2;
             }
+            self.input_seen = false;
+            self.hid_reports = self.hid_reports.saturating_add(1);
+            self.last_report = Instant::now();
+        } else {
+            self.hid_busy = self.hid_busy.saturating_add(1);
+        }
+    }
+
+    fn send_scroll_report(&mut self) {
+        let cfg = runtime::config(self.id);
+        let had_input = self.input_seen && (self.accumulated_x != 0 || self.accumulated_y != 0);
+
+        if had_input {
+            let (_logical_x, logical_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
+            self.accumulated_x = 0;
+            self.accumulated_y = 0;
+            self.input_seen = false;
+
+            if logical_y != 0 {
+                let incoming_direction = if logical_y > 0 { 1 } else { -1 };
+                let magnitude = logical_y.abs();
+                let noise = cfg.direction_noise_threshold() as i32;
+                let reverse = cfg.direction_reverse_threshold() as i32;
+                if self.direction == 0 {
+                    if magnitude >= noise { self.direction = incoming_direction; }
+                } else if incoming_direction != self.direction {
+                    if magnitude >= reverse {
+                        self.direction = incoming_direction;
+                        self.wheel_accum_q8 = 0;
+                        self.velocity_q8 = 0;
+                    }
+                }
+                if self.direction == incoming_direction {
+                    let stable_y = magnitude.saturating_mul(self.direction as i32);
+                    let scroll_q8 = stable_y.saturating_mul(Q8_ONE) / runtime::effective_scroll_scale_den(self.id) as i32;
+                    self.wheel_accum_q8 = self.wheel_accum_q8.saturating_add(scroll_q8);
+                    self.velocity_q8 = if runtime::effective_inertia_enabled(self.id) { scroll_q8 / INERTIA_DIV } else { 0 };
+                }
+            }
+        } else if runtime::effective_inertia_enabled(self.id) && self.velocity_q8 != 0 {
+            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_add(self.velocity_q8);
+            let (decay_num, decay_den) = cfg.inertia_decay();
+            self.velocity_q8 = self.velocity_q8.saturating_mul(decay_num as i32) / decay_den as i32;
+            if self.velocity_q8.abs() < STOP_VELOCITY_Q8 {
+                self.velocity_q8 = 0;
+                self.direction = 0;
+            }
+        } else {
+            self.velocity_q8 = 0;
+            self.direction = 0;
+        }
+
+        let wheel_steps = self.wheel_accum_q8 / Q8_ONE;
+        if wheel_steps == 0 {
+            self.last_report = Instant::now();
+            return;
+        }
+        let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let report = Report::MouseReport(MouseReport { buttons: 0, x: 0, y: 0, wheel, pan: 0 });
+        if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
+            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
             self.last_report = Instant::now();
         } else {
@@ -144,13 +223,11 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
     }
 
     fn emit_diag_if_due(&mut self) {
-        if self.last_diag.elapsed() < Duration::from_millis(DIAG_INTERVAL_MS) {
-            return;
-        }
+        if self.last_diag.elapsed() < Duration::from_millis(DIAG_INTERVAL_MS) { return; }
         self.last_diag = Instant::now();
         let motion_pin = self.sensor.motion_pin_active();
         info!(
-            "PAW3222 BLE diag ready={} init_error={:?} pid=0x{:02x} 12bit={} mouse_opt=0x{:02x} motion_pin={} motion_reg=0x{:02x} reads={} events={} last_dx={} last_dy={} accum_x={} accum_y={} hid={} hid_busy={} read_err={} rotation={} gain_q8={}",
+            "PAW3222 BLE diag ready={} init_error={:?} pid=0x{:02x} 12bit={} mouse_opt=0x{:02x} motion_pin={} motion_reg=0x{:02x} reads={} events={} last_dx={} last_dy={} accum_x={} accum_y={} hid={} hid_busy={} read_err={} rotation={} mode={} gain_q8={} scroll_den={}",
             self.ready,
             self.last_init_error,
             self.sensor.last_product_id(),
@@ -168,27 +245,22 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             self.hid_busy,
             self.read_errors,
             runtime::config(self.id).rotation().degrees(),
-            runtime::config(self.id).cursor_gain_q8(),
+            runtime::effective_mode(self.id) as u8,
+            runtime::effective_cursor_gain_q8(self.id),
+            runtime::effective_scroll_scale_den(self.id),
         );
     }
 
     async fn on_pointing_set_cpi_event(&mut self, event: PointingSetCpiEvent) {
-        if event.device_id != self.id || !self.ready {
-            return;
-        }
+        if event.device_id != self.id || !self.ready { return; }
         runtime::config(self.id).set_cpi(event.cpi);
         info!("PAW3222 BLE set CPI {}", event.cpi);
-        if self.sensor.set_resolution(event.cpi).await.is_err() {
-            warn!("PAW3222 BLE set CPI failed");
-        }
+        if self.sensor.set_resolution(event.cpi).await.is_err() { warn!("PAW3222 BLE set CPI failed"); }
     }
 }
 
 pub type NrfPaw3222BleProcessor = Paw3222BleProcessor<
-    rmk::driver::bitbang_spi::BitBangSpiBus<
-        embassy_nrf::gpio::Output<'static>,
-        embassy_nrf::gpio::Flex<'static>,
-    >,
+    rmk::driver::bitbang_spi::BitBangSpiBus<embassy_nrf::gpio::Output<'static>, embassy_nrf::gpio::Flex<'static>>,
     embassy_nrf::gpio::Output<'static>,
     embassy_nrf::gpio::Input<'static>,
 >;
