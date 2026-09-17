@@ -79,25 +79,24 @@ else:
 
 # ---------------------------------------------------------------------------
 # 2) Forward PointingSetCpiEvent central -> split peripheral.
+#    SplitMessage derives serde + MaxSize, while PointingSetCpiEvent does not.
+#    Serialize only primitive fields across the split link and reconstruct the
+#    event on the peripheral side.
 # ---------------------------------------------------------------------------
 sm = split_mod.read_text()
-split_marker = "PG1KB_SPLIT_CPI_V1"
+split_marker = "PG1KB_SPLIT_CPI_V2"
 if split_marker not in sm:
-    import_anchor = 'use crate::event::{KeyboardEvent, PointingEvent};\n'
-    if import_anchor not in sm:
-        raise SystemExit("split mod import anchor not found")
-    sm = sm.replace(import_anchor, 'use crate::event::{KeyboardEvent, PointingEvent, PointingSetCpiEvent};\n', 1)
     variant_anchor = '    /// Led state, on/off, from central to peripheral\n    LedState(bool),\n'
     if variant_anchor not in sm:
         raise SystemExit("split message variant anchor not found")
-    sm = sm.replace(variant_anchor, '''    // PG1KB_SPLIT_CPI_V1\n    /// Pointing CPI update, central to peripheral.\n    PointingSetCpi(PointingSetCpiEvent),\n''' + variant_anchor, 1)
+    sm = sm.replace(variant_anchor, '''    // PG1KB_SPLIT_CPI_V2\n    /// Pointing CPI update, central to peripheral.\n    PointingSetCpi { device_id: u8, cpi: u16 },\n''' + variant_anchor, 1)
     split_mod.write_text(sm)
-    print("Added PointingSetCpi split message")
+    print("Added serializable PointingSetCpi split message")
 else:
     print("PointingSetCpi split message already present")
 
 sd = split_driver.read_text()
-if "PG1KB_SPLIT_CPI_DRIVER_V1" not in sd:
+if "PG1KB_SPLIT_CPI_DRIVER_V2" not in sd:
     import_anchor = '    KeyboardEvent, KeyboardEventPos, PeripheralConnectedEvent, SubscribableEvent, publish_event, publish_event_async,\n'
     if import_anchor not in sd:
         raise SystemExit("split driver event import anchor not found")
@@ -106,19 +105,19 @@ if "PG1KB_SPLIT_CPI_DRIVER_V1" not in sd:
     sub_anchor = '        let mut sleep_sub = crate::event::SleepStateEvent::subscriber();\n'
     if sub_anchor not in sd:
         raise SystemExit("split driver subscriber anchor not found")
-    sd = sd.replace(sub_anchor, sub_anchor + '        // PG1KB_SPLIT_CPI_DRIVER_V1\n        let mut pointing_cpi_sub = PointingSetCpiEvent::subscriber();\n', 1)
+    sd = sd.replace(sub_anchor, sub_anchor + '        // PG1KB_SPLIT_CPI_DRIVER_V2\n        let mut pointing_cpi_sub = PointingSetCpiEvent::subscriber();\n', 1)
 
     select_anchor = '                    e = sleep_sub.next_event().fuse() => SplitMessage::SleepState(e.0),\n'
     if select_anchor not in sd:
         raise SystemExit("split driver select anchor not found")
-    sd = sd.replace(select_anchor, select_anchor + '                    e = pointing_cpi_sub.next_event().fuse() => SplitMessage::PointingSetCpi(e),\n', 1)
+    sd = sd.replace(select_anchor, select_anchor + '                    e = pointing_cpi_sub.next_event().fuse() => SplitMessage::PointingSetCpi { device_id: e.device_id, cpi: e.cpi },\n', 1)
     split_driver.write_text(sd)
-    print("Forwarding PointingSetCpiEvent over split link")
+    print("Forwarding PointingSetCpiEvent over split link as primitive fields")
 else:
     print("Split CPI central forwarding already present")
 
 sp = split_peripheral.read_text()
-if "PG1KB_SPLIT_CPI_PERIPHERAL_V1" not in sp:
+if "PG1KB_SPLIT_CPI_PERIPHERAL_V2" not in sp:
     import_anchor = '    KeyboardEvent, LayerChangeEvent, LedIndicatorEvent, PointingEvent, SleepStateEvent, SubscribableEvent,\n'
     if import_anchor not in sp:
         raise SystemExit("split peripheral event import anchor not found")
@@ -127,9 +126,9 @@ if "PG1KB_SPLIT_CPI_PERIPHERAL_V1" not in sp:
     match_anchor = '                        SplitMessage::KeyboardIndicator(indicator) => {\n'
     if match_anchor not in sp:
         raise SystemExit("split peripheral match anchor not found")
-    sp = sp.replace(match_anchor, '''                        // PG1KB_SPLIT_CPI_PERIPHERAL_V1\n                        SplitMessage::PointingSetCpi(event) => {\n                            publish_event(event);\n                        }\n''' + match_anchor, 1)
+    sp = sp.replace(match_anchor, '''                        // PG1KB_SPLIT_CPI_PERIPHERAL_V2\n                        SplitMessage::PointingSetCpi { device_id, cpi } => {\n                            publish_event(PointingSetCpiEvent { device_id, cpi });\n                        }\n''' + match_anchor, 1)
     split_peripheral.write_text(sp)
-    print("Applying split CPI updates on peripheral")
+    print("Reconstructing PointingSetCpiEvent on peripheral")
 else:
     print("Split CPI peripheral handling already present")
 
