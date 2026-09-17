@@ -1,3 +1,5 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use rmk::event::{PointingSetCpiEvent, publish_event};
 use rmk::types::protocol::rynk::{RynkError, RynkMessage};
 
@@ -9,7 +11,12 @@ pub const DEFAULT_CPI: u16 = 988;
 
 pub const RYNK_GET_TRACKBALL_CONFIG: u16 = 0x0901;
 pub const RYNK_SET_TRACKBALL_CONFIG: u16 = 0x0902;
+pub const RYNK_SAVE_TRACKBALL_CONFIG: u16 = 0x0903;
+pub const RYNK_LOAD_TRACKBALL_DEFAULTS: u16 = 0x0904;
 const TRACKBALL_CONFIG_WIRE_LEN: usize = 16;
+pub const TRACKBALL_PERSISTED_LEN: usize = TRACKBALL_CONFIG_WIRE_LEN * 2;
+
+static SAVE_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 pub fn config(device_id: u8) -> &'static RuntimeTrackballConfig {
     if device_id == LEFT_TRACKBALL_ID {
@@ -66,8 +73,8 @@ fn encode_config(device_id: u8) -> [u8; TRACKBALL_CONFIG_WIRE_LEN] {
     out[8] = decay_den;
     out[9] = cfg.rotation().raw();
     // Capability bits: CPI, cursor gain, scroll scale, inertia, rotation.
-    // Left CPI is intentionally read-only until CPI routing to the peripheral is added.
-    out[10] = if device_id == RIGHT_TRACKBALL_ID { 0b0001_1111 } else { 0b0001_1110 };
+    // Both sides now support CPI; left is forwarded across the split link.
+    out[10] = 0b0001_1111;
     // Mode hint used by MyKeebStudio: 0=cursor, 1=scroll.
     out[11] = if device_id == LEFT_TRACKBALL_ID { 1 } else { 0 };
     out
@@ -82,9 +89,7 @@ fn apply_config(device_id: u8, data: &[u8; TRACKBALL_CONFIG_WIRE_LEN]) {
     let decay_num = data[7].min(decay_den);
     let rotation = SensorRotation::from_raw(data[9]);
 
-    if device_id == RIGHT_TRACKBALL_ID {
-        set_pointing_cpi(device_id, cpi);
-    }
+    set_pointing_cpi(device_id, cpi);
     set_cursor_gain_q8(device_id, cursor_gain_q8);
     set_scroll_scale_den(device_id, scroll_scale_den);
     set_inertia_enabled(device_id, inertia_enabled);
@@ -92,12 +97,67 @@ fn apply_config(device_id: u8, data: &[u8; TRACKBALL_CONFIG_WIRE_LEN]) {
     set_sensor_rotation(device_id, rotation);
 }
 
+pub fn encode_persisted_blob() -> [u8; TRACKBALL_PERSISTED_LEN] {
+    let mut out = [0u8; TRACKBALL_PERSISTED_LEN];
+    let right = encode_config(RIGHT_TRACKBALL_ID);
+    let left = encode_config(LEFT_TRACKBALL_ID);
+    out[..TRACKBALL_CONFIG_WIRE_LEN].copy_from_slice(&right);
+    out[TRACKBALL_CONFIG_WIRE_LEN..].copy_from_slice(&left);
+    out
+}
+
+pub fn apply_persisted_blob(data: &[u8; TRACKBALL_PERSISTED_LEN]) {
+    let mut right = [0u8; TRACKBALL_CONFIG_WIRE_LEN];
+    let mut left = [0u8; TRACKBALL_CONFIG_WIRE_LEN];
+    right.copy_from_slice(&data[..TRACKBALL_CONFIG_WIRE_LEN]);
+    left.copy_from_slice(&data[TRACKBALL_CONFIG_WIRE_LEN..]);
+    apply_config(RIGHT_TRACKBALL_ID, &right);
+    apply_config(LEFT_TRACKBALL_ID, &left);
+}
+
+pub fn load_defaults() {
+    let right = [
+        0xdc, 0x03, // 988 CPI
+        0x00, 0x01, // 1.0x cursor gain
+        0x06, 0x00, // scroll denominator 6
+        0x00,       // inertia off
+        0x0f, 0x10, // 15/16
+        0x00,       // rotation 0
+        0x1f,       // capabilities
+        0x00,       // cursor mode
+        0x00, 0x00, 0x00, 0x00,
+    ];
+    let left = [
+        0xdc, 0x03, // 988 CPI
+        0x00, 0x01, // 1.0x cursor gain
+        0x06, 0x00, // scroll denominator 6
+        0x01,       // inertia on
+        0x0f, 0x10, // 15/16
+        0x01,       // rotation 90 deg
+        0x1f,       // capabilities
+        0x01,       // scroll mode
+        0x00, 0x00, 0x00, 0x00,
+    ];
+    apply_config(RIGHT_TRACKBALL_ID, &right);
+    apply_config(LEFT_TRACKBALL_ID, &left);
+}
+
+pub fn request_save() {
+    SAVE_REQUESTED.store(true, Ordering::Release);
+}
+
+pub fn take_save_request() -> bool {
+    SAVE_REQUESTED.swap(false, Ordering::AcqRel)
+}
+
 /// PG1KB private Rynk extension.
 ///
-/// GET  0x0901 request: device_id:u8
-/// GET  response: Result<[u8;16], RynkError>
-/// SET  0x0902 request: [device_id, 16 config bytes]
-/// SET  response: Result<(), RynkError>
+/// GET      0x0901 request: device_id:u8
+/// GET      response: Result<[u8;16], RynkError>
+/// SET      0x0902 request: [device_id, 16 config bytes]
+/// SET      response: Result<(), RynkError>
+/// SAVE     0x0903 request: () ; queues flash persistence
+/// DEFAULTS 0x0904 request: () ; restores firmware defaults live
 pub fn handle_rynk_trackball(msg: &mut RynkMessage<'_>) -> Option<Result<(), RynkError>> {
     match msg.header().cmd.raw() {
         RYNK_GET_TRACKBALL_CONFIG => {
@@ -121,6 +181,20 @@ pub fn handle_rynk_trackball(msg: &mut RynkMessage<'_>) -> Option<Result<(), Ryn
             let mut data = [0u8; TRACKBALL_CONFIG_WIRE_LEN];
             data.copy_from_slice(&request[1..]);
             apply_config(device_id, &data);
+            Some(msg.encode_response(&()))
+        }
+        RYNK_SAVE_TRACKBALL_CONFIG => {
+            if let Err(error) = msg.decode_request::<()>() {
+                return Some(Err(error));
+            }
+            request_save();
+            Some(msg.encode_response(&()))
+        }
+        RYNK_LOAD_TRACKBALL_DEFAULTS => {
+            if let Err(error) = msg.decode_request::<()>() {
+                return Some(Err(error));
+            }
+            load_defaults();
             Some(msg.encode_response(&()))
         }
         _ => None,
