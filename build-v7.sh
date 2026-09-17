@@ -11,6 +11,12 @@ bash scripts/patch_rmk_fast_host_adv.sh 50
 bash scripts/patch_rmk_split_trackball_latency.sh 0
 bash scripts/patch_rmk_rynk_custom_hook.sh
 
+# Cargo treats registry dependencies as immutable and may otherwise reuse an
+# already-built RMK rlib even after the local registry source is patched.
+# Clean only RMK so the patched public Rynk hook is definitely recompiled.
+echo "Forcing rebuild of patched RMK dependency..."
+cargo clean -p rmk
+
 ai-build cargo make uf2-v7 --release
 
 OUT=/mnt/d/rmk-firmware
