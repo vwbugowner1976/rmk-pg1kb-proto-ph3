@@ -1,21 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mapfile -t CANDIDATES < <(
-  find "$HOME/.cargo/registry/src" -type f \
-    -path '*/rmk-0.9.*/src/host/rynk/mod.rs' 2>/dev/null | sort
-)
+# Resolve the exact RMK package selected by this project's Cargo.lock/metadata.
+# Do not guess from ~/.cargo/registry/src because multiple registry copies may exist.
+RMK_MANIFEST="$(cargo metadata --format-version 1 --locked 2>/dev/null | python3 -c '
+import json, sys
+m = json.load(sys.stdin)
+for p in m["packages"]:
+    if p["name"] == "rmk" and p["version"].startswith("0.9."):
+        print(p["manifest_path"])
+        break
+')"
 
-if [ "${#CANDIDATES[@]}" -eq 0 ]; then
-  echo "RMK 0.9 Rynk source not found in Cargo registry." >&2
-  echo "Run 'cargo fetch' or one normal build first, then retry." >&2
+if [ -z "$RMK_MANIFEST" ] || [ ! -f "$RMK_MANIFEST" ]; then
+  echo "Active RMK 0.9 manifest not found via cargo metadata." >&2
+  echo "Run cargo fetch first, then retry." >&2
   exit 1
 fi
 
-RYNK_RS="${CANDIDATES[-1]}"
-HOST_MOD_RS="$(dirname "$(dirname "$RYNK_RS")")/mod.rs"
+RMK_ROOT="$(dirname "$RMK_MANIFEST")"
+RYNK_RS="$RMK_ROOT/src/host/rynk/mod.rs"
+HOST_MOD_RS="$RMK_ROOT/src/host/mod.rs"
 BACKUP="${RYNK_RS}.pg1kb-backup"
 HOST_MOD_BACKUP="${HOST_MOD_RS}.pg1kb-backup"
+
+if [ ! -f "$RYNK_RS" ] || [ ! -f "$HOST_MOD_RS" ]; then
+  echo "Expected Rynk source files not found under active RMK package: $RMK_ROOT" >&2
+  exit 1
+fi
 
 if [ ! -f "$BACKUP" ]; then
   cp "$RYNK_RS" "$BACKUP"
@@ -85,27 +97,35 @@ fn dispatch_custom(msg: &mut RynkMessage<'_>) -> Option<Result<(), RynkError>> {
         1,
     )
     path.write_text(text)
-    print("Patched RMK Rynk application custom-command hook")
+    print("Patched active RMK Rynk application custom-command hook")
 else:
-    print(f"Rynk custom hook already present: {path}")
+    print(f"Rynk custom hook already present in active RMK: {path}")
 
-# RMK 0.9 keeps host::rynk crate-private. PG1KB needs to call the tiny
-# register_custom_handler() extension from the application crate.
 host_text = host_mod.read_text()
 private_decl = '#[cfg(feature = "rynk")]\npub(crate) mod rynk;'
 public_decl = '#[cfg(feature = "rynk")]\npub mod rynk;'
 if public_decl in host_text:
-    print(f"Rynk module already public: {host_mod}")
+    print(f"Active RMK Rynk module already public: {host_mod}")
 elif private_decl in host_text:
     host_text = host_text.replace(private_decl, public_decl, 1)
     host_mod.write_text(host_text)
-    print("Exposed RMK host::rynk module for PG1KB custom handler registration")
+    print("Exposed active RMK host::rynk module for PG1KB custom handler registration")
 else:
     print(f"Could not locate private Rynk module declaration in {host_mod}", file=sys.stderr)
     raise SystemExit(5)
 
-print(f"Rynk file: {path}")
-print(f"Host mod : {host_mod}")
+# Final hard verification: fail before cargo build if the active package was not patched.
+verify_host = host_mod.read_text()
+verify_rynk = path.read_text()
+if public_decl not in verify_host:
+    print("VERIFY FAILED: active RMK host::rynk is still private", file=sys.stderr)
+    raise SystemExit(6)
+if marker not in verify_rynk:
+    print("VERIFY FAILED: active RMK custom hook is missing", file=sys.stderr)
+    raise SystemExit(7)
+
+print("VERIFY OK: active RMK custom Rynk hook + public module")
+print(f"Active RMK root: {path.parents[2]}")
 PY
 
 echo
