@@ -9,7 +9,6 @@ fi
 
 python3 - "$RMK_ROOT" <<'PY'
 from pathlib import Path
-import re
 import sys
 
 root = Path(sys.argv[1])
@@ -24,23 +23,21 @@ for p in [storage, host, split_mod, split_driver, split_peripheral]:
         raise SystemExit(f"missing RMK source: {p}")
 
 # ---------------------------------------------------------------------------
-# 1) Small persistent 32-byte PG1KB trackball blob using RMK's own storage task.
+# 1) Small persistent 32-byte PG1KB trackball blob using RMK 0.9's storage task.
+#    RMK 0.9 has no Flush message, so use a dedicated write-completion Signal.
 # ---------------------------------------------------------------------------
 s = storage.read_text()
-marker = "PG1KB_TRACKBALL_STORAGE_V1"
+marker = "PG1KB_TRACKBALL_STORAGE_V2"
 if marker not in s:
     sig_anchor = 'static ACTIVE_BLE_PROFILE_RESPONSE: Signal<crate::RawMutex, Option<u8>> = Signal::new();\n'
     if sig_anchor not in s:
         raise SystemExit("storage signal anchor not found")
-    s = s.replace(sig_anchor, sig_anchor + '''\n// PG1KB_TRACKBALL_STORAGE_V1\nstatic PG1KB_TRACKBALL_RESPONSE: Signal<crate::RawMutex, Option<[u8; 32]>> = Signal::new();\n\npub async fn pg1kb_read_trackball_config() -> Option<[u8; 32]> {\n    PG1KB_TRACKBALL_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::ReadPg1kbTrackballConfig).await;\n    PG1KB_TRACKBALL_RESPONSE.wait().await\n}\n\npub async fn pg1kb_write_trackball_config(data: [u8; 32]) -> bool {\n    FLASH_CHANNEL.send(FlashOperationMessage::Pg1kbTrackballConfig(data)).await;\n    flush().await\n}\n''', 1)
+    s = s.replace(sig_anchor, sig_anchor + '''\n// PG1KB_TRACKBALL_STORAGE_V2\nstatic PG1KB_TRACKBALL_RESPONSE: Signal<crate::RawMutex, Option<[u8; 32]>> = Signal::new();\nstatic PG1KB_TRACKBALL_WRITE_RESPONSE: Signal<crate::RawMutex, bool> = Signal::new();\n\npub async fn pg1kb_read_trackball_config() -> Option<[u8; 32]> {\n    PG1KB_TRACKBALL_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::ReadPg1kbTrackballConfig).await;\n    PG1KB_TRACKBALL_RESPONSE.wait().await\n}\n\npub async fn pg1kb_write_trackball_config(data: [u8; 32]) -> bool {\n    PG1KB_TRACKBALL_WRITE_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::Pg1kbTrackballConfig(data)).await;\n    PG1KB_TRACKBALL_WRITE_RESPONSE.wait().await\n}\n''', 1)
 
-    # RMK 0.9 snapshots differ in the comment immediately before Flush. Anchor
-    # on the enum variant itself instead of the comment text.
-    flush_match = re.search(r'(?m)^    Flush,\s*$', s)
-    if not flush_match:
-        raise SystemExit("storage FlashOperationMessage::Flush variant not found")
-    insertion = '''    // PG1KB private persisted trackball settings.\n    Pg1kbTrackballConfig([u8; 32]),\n    ReadPg1kbTrackballConfig,\n'''
-    s = s[:flush_match.start()] + insertion + s[flush_match.start():]
+    enum_anchor = '    ReadActiveBleProfile,\n}\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\n'
+    if enum_anchor not in s:
+        raise SystemExit("storage FlashOperationMessage tail anchor not found")
+    s = s.replace(enum_anchor, '''    ReadActiveBleProfile,\n    // PG1KB private persisted trackball settings.\n    Pg1kbTrackballConfig([u8; 32]),\n    ReadPg1kbTrackballConfig,\n}\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\n''', 1)
 
     key_anchor = '    #[cfg(feature = "_ble")]\n    BondInfo(u8),\n'
     if key_anchor not in s:
@@ -52,17 +49,17 @@ if marker not in s:
         raise SystemExit("storage data anchor not found")
     s = s.replace(data_anchor, data_anchor + '    Pg1kbTrackballConfig([u8; 32]),\n', 1)
 
-    run_anchor = '                FlashOperationMessage::Flush => {\n'
+    run_anchor = '''                #[cfg(feature = "_ble")]\n                FlashOperationMessage::ReadActiveBleProfile => {\n                    let resp = match self.fetch_data(StorageKey::ActiveBleProfile).await {\n                        Some(StorageData::ActiveBleProfile(v)) => Some(v),\n                        _ => None,\n                    };\n                    ACTIVE_BLE_PROFILE_RESPONSE.signal(resp);\n                    continue;\n                }\n\n'''
     if run_anchor not in s:
-        raise SystemExit("storage run Flush anchor not found")
-    s = s.replace(run_anchor, '''                FlashOperationMessage::Pg1kbTrackballConfig(data) => {\n                    self.store_data(\n                        StorageKey::Pg1kbTrackballConfig,\n                        &StorageData::Pg1kbTrackballConfig(data),\n                    )\n                    .await\n                }\n                FlashOperationMessage::ReadPg1kbTrackballConfig => {\n                    let resp = match self.fetch_data(StorageKey::Pg1kbTrackballConfig).await {\n                        Some(StorageData::Pg1kbTrackballConfig(v)) => Some(v),\n                        _ => None,\n                    };\n                    PG1KB_TRACKBALL_RESPONSE.signal(resp);\n                    continue;\n                }\n''' + run_anchor, 1)
+        raise SystemExit("storage run ReadActiveBleProfile anchor not found")
+    s = s.replace(run_anchor, run_anchor + '''                FlashOperationMessage::Pg1kbTrackballConfig(data) => {\n                    let ok = self\n                        .store_data(\n                            StorageKey::Pg1kbTrackballConfig,\n                            &StorageData::Pg1kbTrackballConfig(data),\n                        )\n                        .await\n                        .is_ok();\n                    PG1KB_TRACKBALL_WRITE_RESPONSE.signal(ok);\n                    continue;\n                }\n                FlashOperationMessage::ReadPg1kbTrackballConfig => {\n                    let resp = match self.fetch_data(StorageKey::Pg1kbTrackballConfig).await {\n                        Some(StorageData::Pg1kbTrackballConfig(v)) => Some(v),\n                        _ => None,\n                    };\n                    PG1KB_TRACKBALL_RESPONSE.signal(resp);\n                    continue;\n                }\n\n''', 1)
 
     storage.write_text(s)
-    print("Patched RMK storage for PG1KB trackball persistence")
+    print("Patched RMK 0.9 storage for PG1KB trackball persistence")
 else:
     print("RMK PG1KB trackball storage patch already present")
 
-# Re-export only the two storage helpers from the already-public host module.
+# Re-export only the two storage helpers from rmk::host.
 h = host.read_text()
 export_marker = "PG1KB_TRACKBALL_STORAGE_EXPORT_V1"
 if export_marker not in h:
