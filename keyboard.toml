@@ -39,21 +39,21 @@ LT(1, Language2) Space LGui LAlt Z LShift LT(2, Language1) Enter RCtrl RShift Sl
 [[keymap.layer]]
 name = "Num"
 keys = """
-Transparent Transparent No No No No WM(C, LCtrl) WM(V, LCtrl) No No No No
-Kc5 Kc4 Kc3 Kc2 Kc0 Transparent Kc6 Kc7 Kc8 Kc9 Transparent Backspace
-Transparent Transparent Transparent Transparent Kc1 Transparent Left Down Up Right Kc0 Delete
-F5 F4 F3 F2 Transparent Transparent F6 F7 F8 F9 Transparent Transparent
-Transparent Transparent Transparent Transparent F1 Transparent Transparent Transparent Transparent Transparent F10 F11
+__ __ No No No No WM(C, LCtrl) WM(V, LCtrl) No No No No
+Kc5 Kc4 Kc3 Kc2 Kc0 __ Kc6 Kc7 Kc8 Kc9 __ Backspace
+__ __ __ __ Kc1 __ Left Down Up Right Kc0 Delete
+F5 F4 F3 F2 __ __ F6 F7 F8 F9 __ __
+__ __ __ __ F1 __ __ __ __ __ F10 F11
 """
 
 [[keymap.layer]]
 name = "Sym"
 keys = """
-Transparent Transparent No No No No Transparent Transparent No No No No
+__ __ No No No No __ __ No No No No
 WM(Kc5, LShift) WM(Kc4, LShift) WM(Kc3, LShift) WM(Kc2, LShift) WM(Kc1, LShift) Grave WM(Kc6, LShift) WM(Kc7, LShift) WM(Kc8, LShift) Home End F12
-LeftBracket WM(LeftBracket, LShift) Transparent Transparent WM(Slash, LShift) WM(Grave, LShift) RightBracket WM(RightBracket, LShift) Transparent Transparent PrintScreen Transparent
-WM(Comma, LShift) WM(Kc9, LShift) Transparent Transparent Transparent Transparent WM(Dot, LShift) WM(Kc0, LShift) Transparent Transparent WM(Semicolon, LShift) WM(Quote, LShift)
-Transparent Transparent Transparent Transparent Transparent Transparent Transparent Transparent Transparent Transparent WM(Slash, LShift) WM(Backslash, LShift)
+LeftBracket WM(LeftBracket, LShift) __ __ WM(Slash, LShift) WM(Grave, LShift) RightBracket WM(RightBracket, LShift) __ __ PrintScreen __
+WM(Comma, LShift) WM(Kc9, LShift) __ __ __ __ WM(Dot, LShift) WM(Kc0, LShift) __ __ WM(Semicolon, LShift) WM(Quote, LShift)
+__ __ __ __ __ __ __ __ __ __ WM(Slash, LShift) WM(Backslash, LShift)
 """
 
 [ble]
