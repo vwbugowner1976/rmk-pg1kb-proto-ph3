@@ -1,4 +1,5 @@
 target
+.rmk-patched/
 
 *.bin
 *.elf
