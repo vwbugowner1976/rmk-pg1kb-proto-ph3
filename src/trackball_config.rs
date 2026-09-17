@@ -19,9 +19,7 @@ impl SensorRotation {
         }
     }
 
-    pub const fn raw(self) -> u8 {
-        self as u8
-    }
+    pub const fn raw(self) -> u8 { self as u8 }
 
     pub const fn degrees(self) -> u16 {
         match self {
@@ -50,6 +48,8 @@ pub struct RuntimeTrackballConfig {
     inertia_decay_num: AtomicU8,
     inertia_decay_den: AtomicU8,
     rotation: AtomicU8,
+    direction_noise_threshold: AtomicU8,
+    direction_reverse_threshold: AtomicU8,
 }
 
 impl RuntimeTrackballConfig {
@@ -61,6 +61,8 @@ impl RuntimeTrackballConfig {
         inertia_decay_num: u8,
         inertia_decay_den: u8,
         rotation: SensorRotation,
+        direction_noise_threshold: u8,
+        direction_reverse_threshold: u8,
     ) -> Self {
         Self {
             cpi: AtomicU16::new(cpi),
@@ -70,6 +72,8 @@ impl RuntimeTrackballConfig {
             inertia_decay_num: AtomicU8::new(inertia_decay_num),
             inertia_decay_den: AtomicU8::new(inertia_decay_den),
             rotation: AtomicU8::new(rotation as u8),
+            direction_noise_threshold: AtomicU8::new(direction_noise_threshold),
+            direction_reverse_threshold: AtomicU8::new(direction_reverse_threshold),
         }
     }
 
@@ -84,6 +88,8 @@ impl RuntimeTrackballConfig {
         )
     }
     pub fn rotation(&self) -> SensorRotation { SensorRotation::from_raw(self.rotation.load(Ordering::Relaxed)) }
+    pub fn direction_noise_threshold(&self) -> u8 { self.direction_noise_threshold.load(Ordering::Relaxed).max(1) }
+    pub fn direction_reverse_threshold(&self) -> u8 { self.direction_reverse_threshold.load(Ordering::Relaxed).max(1) }
 
     pub fn set_cpi(&self, value: u16) { self.cpi.store(value, Ordering::Relaxed); }
     pub fn set_cursor_gain_q8(&self, value: u16) { self.cursor_gain_q8.store(value, Ordering::Relaxed); }
@@ -94,24 +100,14 @@ impl RuntimeTrackballConfig {
         self.inertia_decay_den.store(den.max(1), Ordering::Relaxed);
     }
     pub fn set_rotation(&self, value: SensorRotation) { self.rotation.store(value as u8, Ordering::Relaxed); }
+    pub fn set_direction_noise_threshold(&self, value: u8) { self.direction_noise_threshold.store(value.max(1), Ordering::Relaxed); }
+    pub fn set_direction_reverse_threshold(&self, value: u8) { self.direction_reverse_threshold.store(value.max(1), Ordering::Relaxed); }
 }
 
 pub static RIGHT_TRACKBALL_CONFIG: RuntimeTrackballConfig = RuntimeTrackballConfig::new(
-    988,
-    256,
-    6,
-    false,
-    15,
-    16,
-    SensorRotation::Deg0,
+    988, 256, 6, false, 15, 16, SensorRotation::Deg0, 2, 4,
 );
 
 pub static LEFT_TRACKBALL_CONFIG: RuntimeTrackballConfig = RuntimeTrackballConfig::new(
-    988,
-    256,
-    6,
-    true,
-    15,
-    16,
-    SensorRotation::Deg90,
+    988, 256, 6, true, 15, 16, SensorRotation::Deg90, 2, 4,
 );
