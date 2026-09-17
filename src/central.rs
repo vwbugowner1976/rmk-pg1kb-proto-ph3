@@ -16,6 +16,9 @@ mod keyboard_central {
         use embassy_nrf::gpio::{Flex, Input, Level, Output, OutputDrive, Pull};
         use rmk::driver::bitbang_spi::BitBangSpiBus;
 
+        // Register the PG1KB private Rynk commands before the host session starts.
+        rmk::host::rynk::register_custom_handler(crate::runtime::handle_rynk_trackball);
+
         // PG1KB Proto PH3 right trackball wiring:
         // SCLK=P1.05, SDIO=P1.07, CS=P1.03, MOTION=P1.15 (active low).
         let sck = Output::new(p.P1_05, Level::High, OutputDrive::Standard);
