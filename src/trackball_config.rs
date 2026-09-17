@@ -19,6 +19,10 @@ impl SensorRotation {
         }
     }
 
+    pub const fn raw(self) -> u8 {
+        self as u8
+    }
+
     pub const fn degrees(self) -> u16 {
         match self {
             Self::Deg0 => 0,
