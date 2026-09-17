@@ -9,7 +9,9 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-rmk = { version = "0.9", default-features = false, features = [
+# build-v7.sh creates this from the installed official crates.io RMK 0.9.0
+# source before every build, then applies only the PG1KB local patches.
+rmk = { path = ".rmk-patched/rmk-0.9.0", default-features = false, features = [
     "storage",
     "watchdog",
     "nrf52840_ble",
