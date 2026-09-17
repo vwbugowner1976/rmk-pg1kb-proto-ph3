@@ -18,17 +18,42 @@ map = """
 (4,0) (4,1) (4,2) (4,3) (4,4) (4,5) (4,6) (4,7) (4,8) (4,9) (4,10) (4,11)
 """
 
+# The logical keymap follows the original ZMK PG1KB physical transform, but is
+# stored in RMK's 5x12 matrix order. The eight non-physical cells in row 0 stay No.
+# Base bottom-center keeps the original layer-tap behavior:
+#   LT(1, Language2) -> hold Num / tap Language2
+#   LT(2, Language1) -> hold Sym / tap Language1
 [keymap]
-layers = 1
+layers = 3
 
 [[keymap.layer]]
 name = "Base"
 keys = """
-No No No No No No Y U I O P Enter
-No No No No No No H J K L A B
-No No No No No No N M C D E F
-No No No No No No Kc1 Kc2 Kc3 Kc4 Kc5 Kc6
-No No No No No No F1 F2 F3 F4 F5 F6
+MouseBtn2 MouseBtn1 No No No No MouseBtn3 MouseBtn1 No No No No
+T R E W MouseBtn4 Escape Y U I O MouseBtn5 Minus
+G F D S Q Tab H J K L P Equal
+B V C X A LCtrl N M Comma Dot Semicolon Quote
+LT(1, Language2) Space LGui LAlt Z LShift LT(2, Language1) Enter RCtrl RShift Slash Backslash
+"""
+
+[[keymap.layer]]
+name = "Num"
+keys = """
+Transparent Transparent No No No No WM(C, LCtrl) WM(V, LCtrl) No No No No
+Kc5 Kc4 Kc3 Kc2 Kc0 Transparent Kc6 Kc7 Kc8 Kc9 Transparent Backspace
+Transparent Transparent Transparent Transparent Kc1 Transparent Left Down Up Right Kc0 Delete
+F5 F4 F3 F2 Transparent Transparent F6 F7 F8 F9 Transparent Transparent
+Transparent Transparent Transparent Transparent F1 Transparent Transparent Transparent Transparent Transparent F10 F11
+"""
+
+[[keymap.layer]]
+name = "Sym"
+keys = """
+Transparent Transparent No No No No Transparent Transparent No No No No
+WM(Kc5, LShift) WM(Kc4, LShift) WM(Kc3, LShift) WM(Kc2, LShift) WM(Kc1, LShift) Grave WM(Kc6, LShift) WM(Kc7, LShift) WM(Kc8, LShift) Home End F12
+LeftBracket WM(LeftBracket, LShift) Transparent Transparent WM(Slash, LShift) WM(Grave, LShift) RightBracket WM(RightBracket, LShift) Transparent Transparent PrintScreen Transparent
+WM(Comma, LShift) WM(Kc9, LShift) Transparent Transparent Transparent Transparent WM(Dot, LShift) WM(Kc0, LShift) Transparent Transparent WM(Semicolon, LShift) WM(Quote, LShift)
+Transparent Transparent Transparent Transparent Transparent Transparent Transparent Transparent Transparent Transparent WM(Slash, LShift) WM(Backslash, LShift)
 """
 
 [ble]
