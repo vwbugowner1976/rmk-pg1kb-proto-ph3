@@ -1,12 +1,13 @@
 use embassy_time::{Duration, Instant};
 use log::{info, warn};
+use rmk::event::LayerChangeEvent;
 use rmk::macros::processor;
 
 use crate::runtime;
 
 const LOAD_DELAY_MS: u64 = 1200;
 
-#[processor(poll_interval = 100)]
+#[processor(subscribe = [LayerChangeEvent], poll_interval = 100)]
 pub struct TrackballPersistenceProcessor {
     started: Instant,
     loaded: bool,
@@ -18,6 +19,11 @@ impl TrackballPersistenceProcessor {
             started: Instant::now(),
             loaded: false,
         }
+    }
+
+    async fn on_layer_change_event(&mut self, _event: LayerChangeEvent) {
+        // Persistence is timer-driven; this subscription only satisfies RMK's
+        // processor contract without changing trackball or BLE timing.
     }
 
     async fn poll(&mut self) {
