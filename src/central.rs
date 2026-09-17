@@ -6,6 +6,7 @@ mod paw3222_ble;
 mod runtime;
 mod split_pointing_ble;
 mod trackball_config;
+mod trackball_persistence;
 
 use rmk::macros::rmk_central;
 
@@ -42,5 +43,10 @@ mod keyboard_central {
     #[register_processor(poll)]
     fn left_split_pointing() -> crate::split_pointing_ble::SplitPointingBleProcessor {
         crate::split_pointing_ble::SplitPointingBleProcessor::new(crate::runtime::LEFT_TRACKBALL_ID)
+    }
+
+    #[register_processor(poll)]
+    fn trackball_persistence() -> crate::trackball_persistence::TrackballPersistenceProcessor {
+        crate::trackball_persistence::TrackballPersistenceProcessor::new()
     }
 }
