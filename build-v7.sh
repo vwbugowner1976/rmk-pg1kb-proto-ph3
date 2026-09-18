@@ -25,6 +25,7 @@ echo "  $LOCAL_RMK"
 bash scripts/patch_rmk_fast_host_adv.sh 50
 bash scripts/patch_rmk_split_trackball_latency.sh 0
 bash scripts/patch_rmk_split_key_diag.sh
+bash scripts/patch_rmk_key_action_diag.sh
 bash scripts/patch_rmk_rynk_custom_hook.sh
 bash scripts/patch_rmk_pg1kb_runtime.sh
 
