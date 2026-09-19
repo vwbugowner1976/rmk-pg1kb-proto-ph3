@@ -24,7 +24,8 @@ map = """
 #   LT(1, Language2) -> hold Num / tap Language2
 #   LT(2, Language1) -> hold Sym / tap Language1
 [keymap]
-layers = 4
+# Reserve eight runtime-editable layers. MyKeebStudio reveals layers 5-8 on demand.
+layers = 8
 
 # Defaults reconstructed from the PG1KB ZMK Studio screenshots using the
 # shield's exact 52-key matrix transform. RMK stores actions in 5x12 matrix order.
