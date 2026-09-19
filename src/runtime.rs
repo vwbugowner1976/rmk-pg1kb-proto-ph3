@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU8, Ordering};
 
 use rmk::event::{PointingSetCpiEvent, publish_event};
 use rmk::types::protocol::rynk::{RynkError, RynkMessage};
