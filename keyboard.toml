@@ -32,10 +32,10 @@ layers = 4
 name = "Base"
 keys = """
 MouseBtn2 MouseBtn1 No No No No MouseBtn3 MouseBtn1 No No No No
-T R E W Q Tab Y U I O Minus Minus
-G F D S A LCtrl H J K L P Equal
-B V C X Z LShift N M Comma Dot Semicolon Quote
-LT(1, Space) LT(2, Space) LGui LAlt LGui Grave LT(2, Language1) Enter RCtrl RShift Slash International3
+T R E W Q Tab Y U I O Minus F13
+G F D S A LCtrl H J K L P F14
+B V C X Z LShift N M Comma Dot Semicolon F15
+LT(1, Space) LT(2, Space) LGui LAlt LGui Grave LT(2, Language1) Enter RCtrl RShift Slash F16
 """
 
 [[keymap.layer]]
@@ -52,8 +52,8 @@ __ __ __ __ F1 __ __ __ __ __ F10 F11
 name = "Sym"
 keys = """
 __ __ No No No No __ __ No No No No
-WM(Kc5, LShift) WM(Kc4, LShift) WM(Kc3, LShift) LeftBracket WM(Kc1, LShift) LeftBrace Equal WM(Kc6, LShift) WM(Quote, LShift) Home End F12
-WM(RightBracket, LShift) RightBracket __ __ WM(Slash, LShift) Plus Backslash WM(Backslash, LShift) __ __ PrintScreen __
+WM(Kc5, LShift) WM(Kc4, LShift) WM(Kc3, LShift) LeftBracket WM(Kc1, LShift) WM(LeftBracket, LShift) Equal WM(Kc6, LShift) WM(Quote, LShift) Home End F12
+WM(RightBracket, LShift) RightBracket __ __ WM(Slash, LShift) WM(Equal, LShift) WM(Backslash, LShift) Backslash __ __ PrintScreen __
 WM(Comma, LShift) WM(Kc8, LShift) __ __ __ __ WM(Dot, LShift) WM(Kc9, LShift) __ __ Quote WM(Kc2, LShift)
 __ __ __ __ __ __ __ __ __ __ WM(Slash, LShift) WM(International3, LShift)
 """
@@ -67,6 +67,21 @@ __ __ __ __ User0 __ __ Kp4 Kp5 Kp6 KpAsterisk KpSlash
 __ __ __ __ __ __ __ Kp1 Kp2 Kp3 KpPlus KpMinus
 __ __ __ __ __ __ __ Kp0 __ KpDot KpEqual __
 """
+
+[behavior.fork]
+forks = [
+  # ZMK jp_minusunder: '-' normally, JIS '_' when shifted.
+  { trigger = "F13", negative_output = "Minus", positive_output = "WM(International1, LShift)", match_any = "LShift|RShift" },
+
+  # ZMK jp_equalplus: JIS '=' normally, JIS '+' when shifted.
+  { trigger = "F14", negative_output = "WM(Minus, LShift)", positive_output = "WM(Semicolon, LShift)", match_any = "LShift|RShift" },
+
+  # ZMK jp_quotedquote: JIS quote normally, JIS double quote when shifted.
+  { trigger = "F15", negative_output = "WM(Kc7, LShift)", positive_output = "WM(Kc2, LShift)", match_any = "LShift|RShift" },
+
+  # ZMK jp_yenpipe: JIS yen normally, pipe when shifted.
+  { trigger = "F16", negative_output = "International3", positive_output = "WM(International3, LShift)", match_any = "LShift|RShift" }
+]
 
 [ble]
 enabled = true
