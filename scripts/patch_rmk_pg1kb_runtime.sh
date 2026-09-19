@@ -23,7 +23,7 @@ for p in [storage, host, split_mod, split_driver, split_peripheral]:
         raise SystemExit(f"missing RMK source: {p}")
 
 # ---------------------------------------------------------------------------
-# 1) Small persistent 32-byte PG1KB trackball blob using RMK 0.9's storage task.
+# 1) Small persistent 128-byte PG1KB trackball blob using RMK 0.9's storage task.
 #    RMK 0.9 has no Flush message, so use a dedicated write-completion Signal.
 # ---------------------------------------------------------------------------
 s = storage.read_text()
@@ -32,12 +32,12 @@ if marker not in s:
     sig_anchor = 'static ACTIVE_BLE_PROFILE_RESPONSE: Signal<crate::RawMutex, Option<u8>> = Signal::new();\n'
     if sig_anchor not in s:
         raise SystemExit("storage signal anchor not found")
-    s = s.replace(sig_anchor, sig_anchor + '''\n// PG1KB_TRACKBALL_STORAGE_V2\nstatic PG1KB_TRACKBALL_RESPONSE: Signal<crate::RawMutex, Option<[u8; 32]>> = Signal::new();\nstatic PG1KB_TRACKBALL_WRITE_RESPONSE: Signal<crate::RawMutex, bool> = Signal::new();\n\npub async fn pg1kb_read_trackball_config() -> Option<[u8; 32]> {\n    PG1KB_TRACKBALL_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::ReadPg1kbTrackballConfig).await;\n    PG1KB_TRACKBALL_RESPONSE.wait().await\n}\n\npub async fn pg1kb_write_trackball_config(data: [u8; 32]) -> bool {\n    PG1KB_TRACKBALL_WRITE_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::Pg1kbTrackballConfig(data)).await;\n    PG1KB_TRACKBALL_WRITE_RESPONSE.wait().await\n}\n''', 1)
+    s = s.replace(sig_anchor, sig_anchor + '''\n// PG1KB_TRACKBALL_STORAGE_V2\nstatic PG1KB_TRACKBALL_RESPONSE: Signal<crate::RawMutex, Option<[u8; 128]>> = Signal::new();\nstatic PG1KB_TRACKBALL_WRITE_RESPONSE: Signal<crate::RawMutex, bool> = Signal::new();\n\npub async fn pg1kb_read_trackball_config() -> Option<[u8; 128]> {\n    PG1KB_TRACKBALL_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::ReadPg1kbTrackballConfig).await;\n    PG1KB_TRACKBALL_RESPONSE.wait().await\n}\n\npub async fn pg1kb_write_trackball_config(data: [u8; 128]) -> bool {\n    PG1KB_TRACKBALL_WRITE_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::Pg1kbTrackballConfig(data)).await;\n    PG1KB_TRACKBALL_WRITE_RESPONSE.wait().await\n}\n''', 1)
 
     enum_anchor = '    ReadActiveBleProfile,\n}\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\n'
     if enum_anchor not in s:
         raise SystemExit("storage FlashOperationMessage tail anchor not found")
-    s = s.replace(enum_anchor, '''    ReadActiveBleProfile,\n    // PG1KB private persisted trackball settings.\n    Pg1kbTrackballConfig([u8; 32]),\n    ReadPg1kbTrackballConfig,\n}\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\n''', 1)
+    s = s.replace(enum_anchor, '''    ReadActiveBleProfile,\n    // PG1KB private persisted trackball settings.\n    Pg1kbTrackballConfig([u8; 128]),\n    ReadPg1kbTrackballConfig,\n}\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\n''', 1)
 
     key_anchor = '    #[cfg(feature = "_ble")]\n    BondInfo(u8),\n'
     if key_anchor not in s:
@@ -47,7 +47,7 @@ if marker not in s:
     data_anchor = '    #[cfg(feature = "_ble")]\n    ActiveBleProfile(u8),\n'
     if data_anchor not in s:
         raise SystemExit("storage data anchor not found")
-    s = s.replace(data_anchor, data_anchor + '    Pg1kbTrackballConfig([u8; 32]),\n', 1)
+    s = s.replace(data_anchor, data_anchor + '    Pg1kbTrackballConfig([u8; 128]),\n', 1)
 
     run_anchor = '''                #[cfg(feature = "_ble")]\n                FlashOperationMessage::ReadActiveBleProfile => {\n                    let resp = match self.fetch_data(StorageKey::ActiveBleProfile).await {\n                        Some(StorageData::ActiveBleProfile(v)) => Some(v),\n                        _ => None,\n                    };\n                    ACTIVE_BLE_PROFILE_RESPONSE.signal(resp);\n                    continue;\n                }\n\n'''
     if run_anchor not in s:
