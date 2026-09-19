@@ -67,14 +67,14 @@ const fn profile_raw(mode: TrackballMode, gain_q8: u16, scroll_den: u16, inertia
 }
 
 static LAYER_PROFILES: [AtomicU32; TRACKBALL_LAYER_COUNT * 2] = [
-    // Base: right cursor 3/2, left scroll 1/2 + inertia.
+    // Base: right cursor 3/2 at 0°, left scroll 1/2 + inertia at 180°.
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 384, 6, false, SensorRotation::Deg0)),
     AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 2, true, SensorRotation::Deg180)),
-    // Num: right precision cursor 1/2, left cursor 3/2.
+    // Num: right precision cursor 1/2 at 0°, left cursor 3/2 at 0°.
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 128, 6, false, SensorRotation::Deg0)),
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 384, 6, false, SensorRotation::Deg0)),
-    // Sym: both scroll; right 1/2, left 1/6, inertia.
-    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 2, true, SensorRotation::Deg180)),
+    // Sym: both scroll; keep right untouched at 0°, left scroll at 180°.
+    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 2, true, SensorRotation::Deg0)),
     AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 6, true, SensorRotation::Deg180)),
     // Sys + four reserved layers default to ordinary cursor mode.
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false, SensorRotation::Deg0)),
