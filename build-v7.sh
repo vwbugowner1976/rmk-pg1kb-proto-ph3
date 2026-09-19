@@ -47,6 +47,7 @@ bash scripts/patch_rmk_split_trackball_latency.sh 0
 bash scripts/patch_rmk_rynk_custom_hook.sh
 bash scripts/patch_rmk_pg1kb_ble_keys.sh
 bash scripts/patch_rmk_pg1kb_runtime.sh
+bash scripts/patch_rmk_position_combos.sh
 
 # Cargo.toml points at .rmk-patched/rmk-0.9.0, so this is guaranteed to build
 # the freshly patched source rather than a stale crates.io rlib.
