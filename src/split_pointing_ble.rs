@@ -78,11 +78,16 @@ impl SplitPointingBleProcessor {
         }
 
         let cfg = runtime::config(self.device_id);
-        let (logical_x, logical_y) = cfg.rotation().apply(raw_x, raw_y);
+        let (logical_x, logical_y) = runtime::effective_rotation(self.device_id).apply(raw_x, raw_y);
         match self.sync_mode() {
             TrackballMode::Cursor => {
-                self.cursor_x = self.cursor_x.saturating_add(logical_x);
-                self.cursor_y = self.cursor_y.saturating_add(logical_y);
+                // Left-side split events already arrive at roughly one BLE connection interval.
+                // Emit the HID report immediately instead of waiting for the separate 8 ms poll;
+                // this removes phase jitter unique to the left path. Right-side processing is untouched.
+                let gain_q8 = runtime::effective_cursor_gain_q8(self.device_id) as i32;
+                self.cursor_out_x_q8 = self.cursor_out_x_q8.saturating_add(logical_x.saturating_mul(gain_q8));
+                self.cursor_out_y_q8 = self.cursor_out_y_q8.saturating_add(logical_y.saturating_mul(gain_q8));
+                self.flush_cursor_report();
             }
             TrackballMode::Scroll => {
                 if logical_y == 0 { return; }
@@ -123,6 +128,11 @@ impl SplitPointingBleProcessor {
     }
 
     fn poll_cursor(&mut self) {
+        // Retry any cursor report that could not be queued immediately.
+        self.flush_cursor_report();
+    }
+
+    fn flush_cursor_report(&mut self) {
         if self.cursor_x != 0 || self.cursor_y != 0 {
             let gain_q8 = runtime::effective_cursor_gain_q8(self.device_id) as i32;
             self.cursor_out_x_q8 = self.cursor_out_x_q8.saturating_add(self.cursor_x.saturating_mul(gain_q8));
