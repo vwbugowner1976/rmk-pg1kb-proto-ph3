@@ -28,6 +28,14 @@ pub struct Paw3222SplitProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin
     read_errors: u32,
     last_report: Instant,
     last_diag: Instant,
+    last_publish: Option<Instant>,
+    diag_published: u32,
+    publish_dt_samples: u32,
+    publish_dt_sum_us: u64,
+    publish_dt_min_us: u64,
+    publish_dt_max_us: u64,
+    publish_batch_sum: u64,
+    publish_batch_max: u32,
 }
 
 impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI, CS, MotionPin> {
@@ -47,6 +55,14 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI,
             read_errors: 0,
             last_report: Instant::now(),
             last_diag: Instant::now(),
+            last_publish: None,
+            diag_published: 0,
+            publish_dt_samples: 0,
+            publish_dt_sum_us: 0,
+            publish_dt_min_us: 0,
+            publish_dt_max_us: 0,
+            publish_batch_sum: 0,
+            publish_batch_max: 0,
         }
     }
 
@@ -88,8 +104,18 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI,
 
         if self.last_diag.elapsed() >= Duration::from_millis(DIAG_INTERVAL_MS) {
             self.last_diag = Instant::now();
+            let avg_dt_us = if self.publish_dt_samples == 0 {
+                0
+            } else {
+                self.publish_dt_sum_us / self.publish_dt_samples as u64
+            };
+            let avg_batch = if self.diag_published == 0 {
+                0
+            } else {
+                self.publish_batch_sum / self.diag_published as u64
+            };
             info!(
-                "PAW3222 split diag ready={} pid=0x{:02x} reads={} events={} last_dx={} last_dy={} pub={} read_err={}",
+                "PAW3222 split diag ready={} pid=0x{:02x} reads={} events={} last_dx={} last_dy={} pub={} pub_win={} pub_dt_us_min={} avg={} max={} batch_avg={} batch_max={} read_err={}",
                 self.ready,
                 self.sensor.last_product_id(),
                 self.sensor_reads,
@@ -97,8 +123,21 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI,
                 self.last_delta.x,
                 self.last_delta.y,
                 self.published,
+                self.diag_published,
+                self.publish_dt_min_us,
+                avg_dt_us,
+                self.publish_dt_max_us,
+                avg_batch,
+                self.publish_batch_max,
                 self.read_errors,
             );
+            self.diag_published = 0;
+            self.publish_dt_samples = 0;
+            self.publish_dt_sum_us = 0;
+            self.publish_dt_min_us = 0;
+            self.publish_dt_max_us = 0;
+            self.publish_batch_sum = 0;
+            self.publish_batch_max = 0;
         }
     }
 
@@ -110,6 +149,24 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI,
 
         let x = self.accumulated_x.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
         let y = self.accumulated_y.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+
+        let now = Instant::now();
+        if let Some(last) = self.last_publish {
+            let dt_us = last.elapsed().as_micros();
+            if self.publish_dt_samples == 0 || dt_us < self.publish_dt_min_us {
+                self.publish_dt_min_us = dt_us;
+            }
+            if dt_us > self.publish_dt_max_us {
+                self.publish_dt_max_us = dt_us;
+            }
+            self.publish_dt_sum_us = self.publish_dt_sum_us.saturating_add(dt_us);
+            self.publish_dt_samples = self.publish_dt_samples.saturating_add(1);
+        }
+        self.last_publish = Some(now);
+        let batch = (x as i32).abs().saturating_add((y as i32).abs()) as u32;
+        self.diag_published = self.diag_published.saturating_add(1);
+        self.publish_batch_sum = self.publish_batch_sum.saturating_add(batch as u64);
+        self.publish_batch_max = self.publish_batch_max.max(batch);
 
         publish_event(PointingEvent {
             device_id: self.id,
