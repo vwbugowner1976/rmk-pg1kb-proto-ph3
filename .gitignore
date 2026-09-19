@@ -1,5 +1,6 @@
 target
 .rmk-patched/
+.cache/
 
 *.bin
 *.elf
