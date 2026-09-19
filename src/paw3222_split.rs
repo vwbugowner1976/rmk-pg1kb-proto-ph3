@@ -7,7 +7,10 @@ use rmk::macros::processor;
 
 use crate::paw3222::{MotionDelta, Paw3222, Paw3222Error};
 
-const REPORT_INTERVAL_MS: u64 = 8;
+// Forward left-side motion to the central twice per 8 ms HID frame.
+// The central still emits mouse reports at 8 ms (~125 Hz); this only reduces
+// split-link batching/jitter so cursor motion does not arrive in large 8 ms chunks.
+const REPORT_INTERVAL_MS: u64 = 4;
 const DIAG_INTERVAL_MS: u64 = 1000;
 
 #[processor(subscribe = [PointingSetCpiEvent], poll_interval = 1)]
