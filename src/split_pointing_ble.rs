@@ -1,3 +1,4 @@
+use embassy_time::{Duration, Instant};
 use rmk::channel::BLE_REPORT_CHANNEL;
 use rmk::event::{Axis, PointingEvent};
 use rmk::hid::Report;
@@ -9,6 +10,7 @@ use crate::runtime::{self, TrackballMode};
 const INERTIA_DIV: i32 = 16;
 const STOP_VELOCITY_Q8: i32 = 4;
 const Q8_ONE: i32 = 256;
+const DIAG_INTERVAL_MS: u64 = 1000;
 
 #[processor(subscribe = [PointingEvent], poll_interval = 8)]
 pub struct SplitPointingBleProcessor {
@@ -24,6 +26,26 @@ pub struct SplitPointingBleProcessor {
     last_mode: u8,
     hid_reports: u32,
     hid_busy: u32,
+    last_rx: Option<Instant>,
+    rx_count_window: u32,
+    rx_dt_samples: u32,
+    rx_dt_sum_us: u64,
+    rx_dt_min_us: u64,
+    rx_dt_max_us: u64,
+    rx_batch_sum: u64,
+    rx_batch_max: u32,
+    pending_rx_started: Option<Instant>,
+    last_hid: Option<Instant>,
+    hid_count_window: u32,
+    hid_dt_samples: u32,
+    hid_dt_sum_us: u64,
+    hid_dt_min_us: u64,
+    hid_dt_max_us: u64,
+    rx_to_hid_samples: u32,
+    rx_to_hid_sum_us: u64,
+    rx_to_hid_min_us: u64,
+    rx_to_hid_max_us: u64,
+    last_diag: Instant,
 }
 
 impl SplitPointingBleProcessor {
@@ -41,6 +63,26 @@ impl SplitPointingBleProcessor {
             last_mode: runtime::effective_mode(device_id) as u8,
             hid_reports: 0,
             hid_busy: 0,
+            last_rx: None,
+            rx_count_window: 0,
+            rx_dt_samples: 0,
+            rx_dt_sum_us: 0,
+            rx_dt_min_us: 0,
+            rx_dt_max_us: 0,
+            rx_batch_sum: 0,
+            rx_batch_max: 0,
+            pending_rx_started: None,
+            last_hid: None,
+            hid_count_window: 0,
+            hid_dt_samples: 0,
+            hid_dt_sum_us: 0,
+            hid_dt_min_us: 0,
+            hid_dt_max_us: 0,
+            rx_to_hid_samples: 0,
+            rx_to_hid_sum_us: 0,
+            rx_to_hid_min_us: 0,
+            rx_to_hid_max_us: 0,
+            last_diag: Instant::now(),
         }
     }
 
@@ -53,6 +95,7 @@ impl SplitPointingBleProcessor {
         self.velocity_q8 = 0;
         self.input_seen = false;
         self.direction = 0;
+        self.pending_rx_started = None;
     }
 
     fn sync_mode(&mut self) -> TrackballMode {
@@ -67,6 +110,21 @@ impl SplitPointingBleProcessor {
     async fn on_pointing_event(&mut self, event: PointingEvent) {
         if event.device_id != self.device_id { return; }
 
+        let rx_now = Instant::now();
+        if let Some(last) = self.last_rx {
+            let dt_us = last.elapsed().as_micros();
+            if self.rx_dt_samples == 0 || dt_us < self.rx_dt_min_us {
+                self.rx_dt_min_us = dt_us;
+            }
+            if dt_us > self.rx_dt_max_us {
+                self.rx_dt_max_us = dt_us;
+            }
+            self.rx_dt_sum_us = self.rx_dt_sum_us.saturating_add(dt_us);
+            self.rx_dt_samples = self.rx_dt_samples.saturating_add(1);
+        }
+        self.last_rx = Some(rx_now);
+        self.rx_count_window = self.rx_count_window.saturating_add(1);
+
         let mut raw_x: i32 = 0;
         let mut raw_y: i32 = 0;
         for axis in event.axes {
@@ -76,6 +134,10 @@ impl SplitPointingBleProcessor {
                 _ => {}
             }
         }
+
+        let batch = raw_x.abs().saturating_add(raw_y.abs()) as u32;
+        self.rx_batch_sum = self.rx_batch_sum.saturating_add(batch as u64);
+        self.rx_batch_max = self.rx_batch_max.max(batch);
 
         let cfg = runtime::config(self.device_id);
         let (logical_x, logical_y) = runtime::effective_rotation(self.device_id).apply(raw_x, raw_y);
@@ -87,6 +149,9 @@ impl SplitPointingBleProcessor {
                 let gain_q8 = runtime::effective_cursor_gain_q8(self.device_id) as i32;
                 self.cursor_out_x_q8 = self.cursor_out_x_q8.saturating_add(logical_x.saturating_mul(gain_q8));
                 self.cursor_out_y_q8 = self.cursor_out_y_q8.saturating_add(logical_y.saturating_mul(gain_q8));
+                if self.pending_rx_started.is_none() {
+                    self.pending_rx_started = Some(rx_now);
+                }
                 self.flush_cursor_report();
             }
             TrackballMode::Scroll => {
@@ -125,6 +190,48 @@ impl SplitPointingBleProcessor {
             TrackballMode::Cursor => self.poll_cursor(),
             TrackballMode::Scroll => self.poll_scroll(),
         }
+
+        if self.last_diag.elapsed() >= Duration::from_millis(DIAG_INTERVAL_MS) {
+            self.last_diag = Instant::now();
+            let rx_dt_avg_us = if self.rx_dt_samples == 0 { 0 } else { self.rx_dt_sum_us / self.rx_dt_samples as u64 };
+            let rx_batch_avg = if self.rx_count_window == 0 { 0 } else { self.rx_batch_sum / self.rx_count_window as u64 };
+            let hid_dt_avg_us = if self.hid_dt_samples == 0 { 0 } else { self.hid_dt_sum_us / self.hid_dt_samples as u64 };
+            let rx_to_hid_avg_us = if self.rx_to_hid_samples == 0 { 0 } else { self.rx_to_hid_sum_us / self.rx_to_hid_samples as u64 };
+            log::info!(
+                "LEFT split diag rx_win={} rx_dt_us_min={} avg={} max={} rx_batch_avg={} max={} hid_win={} hid_total={} hid_dt_us_min={} avg={} max={} rx_to_hid_us_min={} avg={} max={} busy={}",
+                self.rx_count_window,
+                self.rx_dt_min_us,
+                rx_dt_avg_us,
+                self.rx_dt_max_us,
+                rx_batch_avg,
+                self.rx_batch_max,
+                self.hid_count_window,
+                self.hid_reports,
+                self.hid_dt_min_us,
+                hid_dt_avg_us,
+                self.hid_dt_max_us,
+                self.rx_to_hid_min_us,
+                rx_to_hid_avg_us,
+                self.rx_to_hid_max_us,
+                self.hid_busy,
+            );
+            self.rx_count_window = 0;
+            self.rx_dt_samples = 0;
+            self.rx_dt_sum_us = 0;
+            self.rx_dt_min_us = 0;
+            self.rx_dt_max_us = 0;
+            self.rx_batch_sum = 0;
+            self.rx_batch_max = 0;
+            self.hid_count_window = 0;
+            self.hid_dt_samples = 0;
+            self.hid_dt_sum_us = 0;
+            self.hid_dt_min_us = 0;
+            self.hid_dt_max_us = 0;
+            self.rx_to_hid_samples = 0;
+            self.rx_to_hid_sum_us = 0;
+            self.rx_to_hid_min_us = 0;
+            self.rx_to_hid_max_us = 0;
+        }
     }
 
     fn poll_cursor(&mut self) {
@@ -149,9 +256,34 @@ impl SplitPointingBleProcessor {
         let y = whole_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let report = Report::MouseReport(MouseReport { buttons: 0, x, y, wheel: 0, pan: 0 });
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
+            let hid_now = Instant::now();
+            if let Some(last) = self.last_hid {
+                let dt_us = last.elapsed().as_micros();
+                if self.hid_dt_samples == 0 || dt_us < self.hid_dt_min_us {
+                    self.hid_dt_min_us = dt_us;
+                }
+                if dt_us > self.hid_dt_max_us {
+                    self.hid_dt_max_us = dt_us;
+                }
+                self.hid_dt_sum_us = self.hid_dt_sum_us.saturating_add(dt_us);
+                self.hid_dt_samples = self.hid_dt_samples.saturating_add(1);
+            }
+            self.last_hid = Some(hid_now);
+            if let Some(started) = self.pending_rx_started.take() {
+                let delay_us = started.elapsed().as_micros();
+                if self.rx_to_hid_samples == 0 || delay_us < self.rx_to_hid_min_us {
+                    self.rx_to_hid_min_us = delay_us;
+                }
+                if delay_us > self.rx_to_hid_max_us {
+                    self.rx_to_hid_max_us = delay_us;
+                }
+                self.rx_to_hid_sum_us = self.rx_to_hid_sum_us.saturating_add(delay_us);
+                self.rx_to_hid_samples = self.rx_to_hid_samples.saturating_add(1);
+            }
             self.cursor_out_x_q8 = self.cursor_out_x_q8.saturating_sub((x as i32).saturating_mul(Q8_ONE));
             self.cursor_out_y_q8 = self.cursor_out_y_q8.saturating_sub((y as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
+            self.hid_count_window = self.hid_count_window.saturating_add(1);
         } else {
             self.hid_busy = self.hid_busy.saturating_add(1);
         }
