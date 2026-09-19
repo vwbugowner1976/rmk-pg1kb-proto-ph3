@@ -26,9 +26,8 @@ map = """
 [keymap]
 layers = 4
 
-# Defaults mirrored from the current PG1KB ZMK layout shown in My ZMK Studio.
-# The matrix is stored in RMK row/column order; MyKeebStudio renders it using
-# the PG1KB physical transform.
+# Defaults reconstructed from the PG1KB ZMK Studio screenshots using the
+# shield's exact 52-key matrix transform. RMK stores actions in 5x12 matrix order.
 [[keymap.layer]]
 name = "Base"
 keys = """
@@ -53,8 +52,8 @@ __ __ __ __ F1 __ __ __ __ __ F10 F11
 name = "Sym"
 keys = """
 __ __ No No No No __ __ No No No No
-WM(Kc5, LShift) WM(Kc4, LShift) WM(Kc3, LShift) LeftBracket WM(Kc1, LShift) WM(LeftBracket, LShift) Equal WM(Kc6, LShift) WM(Quote, LShift) Home End F12
-RightBracket WM(RightBracket, LShift) __ __ WM(Slash, LShift) WM(Equal, LShift) Backslash WM(Backslash, LShift) __ __ PrintScreen __
+WM(Kc5, LShift) WM(Kc4, LShift) WM(Kc3, LShift) LeftBracket WM(Kc1, LShift) LeftBrace Equal WM(Kc6, LShift) WM(Quote, LShift) Home End F12
+WM(RightBracket, LShift) RightBracket __ __ WM(Slash, LShift) Plus Backslash WM(Backslash, LShift) __ __ PrintScreen __
 WM(Comma, LShift) WM(Kc8, LShift) __ __ __ __ WM(Dot, LShift) WM(Kc9, LShift) __ __ Quote WM(Kc2, LShift)
 __ __ __ __ __ __ __ __ __ __ WM(Slash, LShift) WM(International3, LShift)
 """
