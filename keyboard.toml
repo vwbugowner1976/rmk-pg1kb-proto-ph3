@@ -111,9 +111,10 @@ col_offset = 0
 
 [split.peripheral.matrix]
 row_pins = ["P0_15", "P0_19", "P1_01", "P0_09", "P0_10"]
-# Left PCB is mirrored relative to the central; reverse column pin order so
-# physical left-to-right maps to logical col 0..5.
-col_pins = ["P0_02", "P0_03", "P0_28", "P0_29", "P0_04", "P1_11"]
+# Left PCB is mirrored. Keep the electrical column order so the reported
+# matrix coordinates match the original ZMK transform (physical left-to-right
+# is logical col 5..0 on the left half).
+col_pins = ["P1_11", "P0_04", "P0_29", "P0_28", "P0_03", "P0_02"]
 
 [rmk]
 split_peripherals_num = 1
