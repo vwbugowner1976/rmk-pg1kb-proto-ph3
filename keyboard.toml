@@ -34,8 +34,8 @@ keys = """
 MouseBtn2 MouseBtn1 No No No No MouseBtn3 MouseBtn1 No No No No
 T R E W Q Tab Y U I O Minus F13
 G F D S A LCtrl H J K L P F14
-B V C X Z LShift N M Comma Dot Semicolon F15
-LT(1, Space) LT(2, Space) LGui LAlt LGui Grave LT(2, Language1) Enter RCtrl RShift Slash F16
+B V C X Z LShift N M Comma Dot Semicolon F16
+LT(1, Space) LT(2, Space) LGui LAlt LGui Grave LT(2, Language1) Enter RCtrl RShift Slash F17
 """
 
 [[keymap.layer]]
@@ -72,14 +72,14 @@ __ __ __ __ __ __ __ Kp0 __ KpDot KpEqual __
 [behavior.fork]
 forks = [
 # BEGIN rmk-jpkeys-for-us-layout (generated)
-  # JP_QUOTEDQUOTE
-  { trigger = "F15", negative_output = "WM(Kc7, LShift)", positive_output = "WM(Kc2, LShift)", match_any = "LShift|RShift" },
-  # JP_EQUALPLUS
-  { trigger = "F14", negative_output = "WM(Minus, LShift)", positive_output = "WM(Semicolon, LShift)", match_any = "LShift|RShift" },
-  # JP_YENPIPE
-  { trigger = "F16", negative_output = "International3", positive_output = "WM(International3, LShift)", match_any = "LShift|RShift" },
   # JP_MINUSUNDER
   { trigger = "F13", negative_output = "Minus", positive_output = "WM(International1, LShift)", match_any = "LShift|RShift" },
+  # JP_EQUALPLUS
+  { trigger = "F14", negative_output = "WM(Minus, LShift)", positive_output = "WM(Semicolon, LShift)", match_any = "LShift|RShift" },
+  # JP_QUOTEDQUOTE
+  { trigger = "F16", negative_output = "WM(Kc7, LShift)", positive_output = "WM(Kc2, LShift)", match_any = "LShift|RShift" },
+  # JP_YENPIPE
+  { trigger = "F17", negative_output = "International3", positive_output = "WM(International3, LShift)", match_any = "LShift|RShift" },
 # END rmk-jpkeys-for-us-layout (generated)
 ]
 
