@@ -15,8 +15,13 @@ pub const RYNK_SAVE_TRACKBALL_CONFIG: u16 = 0x0903;
 pub const RYNK_LOAD_TRACKBALL_DEFAULTS: u16 = 0x0904;
 pub const RYNK_GET_SAVE_STATUS: u16 = 0x0905;
 pub const RYNK_GET_TRACKBALL_STATE: u16 = 0x0906;
+pub const RYNK_GET_LAYER_PROFILE: u16 = 0x0907;
+pub const RYNK_SET_LAYER_PROFILE: u16 = 0x0908;
+pub const TRACKBALL_LAYER_COUNT: usize = 8;
 const TRACKBALL_CONFIG_WIRE_LEN: usize = 16;
-pub const TRACKBALL_PERSISTED_LEN: usize = TRACKBALL_CONFIG_WIRE_LEN * 2;
+const TRACKBALL_LAYER_PROFILE_WIRE_LEN: usize = 6;
+pub const TRACKBALL_PERSISTED_LEN: usize =
+    TRACKBALL_CONFIG_WIRE_LEN * 2 + TRACKBALL_LAYER_COUNT * 2 * TRACKBALL_LAYER_PROFILE_WIRE_LEN;
 
 pub const SAVE_IDLE: u8 = 0;
 pub const SAVE_PENDING: u8 = 1;
@@ -36,6 +41,76 @@ static SAVE_COMPLETED_GENERATION: AtomicU16 = AtomicU16::new(0);
 static SAVE_STATUS: AtomicU8 = AtomicU8::new(SAVE_IDLE);
 static ACTIVE_LAYER: AtomicU8 = AtomicU8::new(0);
 
+fn pack_layer_profile(mode: TrackballMode, gain_q8: u16, scroll_den: u16, inertia: bool) -> u32 {
+    (mode as u32)
+        | ((gain_q8.min(2047) as u32) << 1)
+        | ((scroll_den.clamp(1, 63) as u32) << 12)
+        | ((inertia as u32) << 18)
+}
+
+fn unpack_layer_profile(raw: u32) -> (TrackballMode, u16, u16, bool) {
+    let mode = if raw & 1 != 0 { TrackballMode::Scroll } else { TrackballMode::Cursor };
+    let gain_q8 = ((raw >> 1) & 0x07ff) as u16;
+    let scroll_den = (((raw >> 12) & 0x3f) as u16).max(1);
+    let inertia = ((raw >> 18) & 1) != 0;
+    (mode, gain_q8.max(16), scroll_den, inertia)
+}
+
+const fn profile_raw(mode: TrackballMode, gain_q8: u16, scroll_den: u16, inertia: bool) -> u32 {
+    (mode as u32)
+        | ((gain_q8 as u32) << 1)
+        | ((scroll_den as u32) << 12)
+        | ((inertia as u32) << 18)
+}
+
+static LAYER_PROFILES: [AtomicU32; TRACKBALL_LAYER_COUNT * 2] = [
+    // Base: right cursor 3/2, left scroll 1/2 + inertia.
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 384, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 2, true)),
+    // Num: right precision cursor 1/2, left cursor 3/2.
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 128, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 384, 6, false)),
+    // Sym: both scroll; right 1/2, left 1/6, inertia.
+    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 2, true)),
+    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 6, true)),
+    // Sys + four reserved layers default to ordinary cursor mode.
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false)),
+    AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false)),
+];
+
+fn layer_profile_index(layer: u8, device_id: u8) -> Option<usize> {
+    let layer = layer as usize;
+    let device = device_id as usize;
+    if layer >= TRACKBALL_LAYER_COUNT || device > LEFT_TRACKBALL_ID as usize {
+        None
+    } else {
+        Some(layer * 2 + device)
+    }
+}
+
+pub fn layer_profile(layer: u8, device_id: u8) -> (TrackballMode, u16, u16, bool) {
+    let idx = layer_profile_index(layer, device_id).unwrap_or(device_id.min(1) as usize);
+    unpack_layer_profile(LAYER_PROFILES[idx].load(Ordering::Relaxed))
+}
+
+pub fn set_layer_profile(layer: u8, device_id: u8, mode: TrackballMode, gain_q8: u16, scroll_den: u16, inertia: bool) -> bool {
+    let Some(idx) = layer_profile_index(layer, device_id) else { return false; };
+    LAYER_PROFILES[idx].store(
+        pack_layer_profile(mode, gain_q8.max(16), scroll_den.max(1), inertia),
+        Ordering::Relaxed,
+    );
+    true
+}
+
+
 pub fn config(device_id: u8) -> &'static RuntimeTrackballConfig {
     if device_id == LEFT_TRACKBALL_ID { &LEFT_TRACKBALL_CONFIG } else { &RIGHT_TRACKBALL_CONFIG }
 }
@@ -43,44 +118,22 @@ pub fn config(device_id: u8) -> &'static RuntimeTrackballConfig {
 pub fn active_layer() -> u8 { ACTIVE_LAYER.load(Ordering::Relaxed) }
 pub fn set_active_layer(layer: u8) { ACTIVE_LAYER.store(layer, Ordering::Relaxed); }
 
-/// Fixed PG1KB v8 layer roles, matching the known-good ZMK layout intent:
-/// Base(0): left scroll 1/2 + inertia, right cursor 3/2
-/// Num(1): left cursor 3/2, right precision cursor 1/2
-/// Sym(2): left precise scroll 1/6 + inertia, right scroll 1/2 + inertia
+/// Runtime-editable PG1KB layer roles. Each of the eight reserved RMK layers
+/// has an independent profile for the right and left trackball.
 pub fn effective_mode(device_id: u8) -> TrackballMode {
-    match (active_layer(), device_id) {
-        (0, RIGHT_TRACKBALL_ID) => TrackballMode::Cursor,
-        (0, LEFT_TRACKBALL_ID) => TrackballMode::Scroll,
-        (1, _) => TrackballMode::Cursor,
-        (2, _) => TrackballMode::Scroll,
-        (_, RIGHT_TRACKBALL_ID) => TrackballMode::Cursor,
-        _ => TrackballMode::Scroll,
-    }
+    layer_profile(active_layer(), device_id).0
 }
 
 pub fn effective_cursor_gain_q8(device_id: u8) -> u16 {
-    match (active_layer(), device_id) {
-        (0, RIGHT_TRACKBALL_ID) => 384,
-        (1, RIGHT_TRACKBALL_ID) => 128,
-        (1, LEFT_TRACKBALL_ID) => 384,
-        _ => config(device_id).cursor_gain_q8(),
-    }
+    layer_profile(active_layer(), device_id).1
 }
 
 pub fn effective_scroll_scale_den(device_id: u8) -> u16 {
-    match (active_layer(), device_id) {
-        (0, LEFT_TRACKBALL_ID) => 2,
-        (2, RIGHT_TRACKBALL_ID) => 2,
-        (2, LEFT_TRACKBALL_ID) => 6,
-        _ => config(device_id).scroll_scale_den(),
-    }
+    layer_profile(active_layer(), device_id).2
 }
 
 pub fn effective_inertia_enabled(device_id: u8) -> bool {
-    match (active_layer(), device_id) {
-        (0, LEFT_TRACKBALL_ID) | (2, RIGHT_TRACKBALL_ID) | (2, LEFT_TRACKBALL_ID) => true,
-        _ => config(device_id).inertia_enabled(),
-    }
+    layer_profile(active_layer(), device_id).3
 }
 
 pub fn set_pointing_cpi(device_id: u8, cpi: u16) {
@@ -150,7 +203,24 @@ pub fn encode_persisted_blob() -> [u8; TRACKBALL_PERSISTED_LEN] {
     let right = encode_config(RIGHT_TRACKBALL_ID);
     let left = encode_config(LEFT_TRACKBALL_ID);
     out[..TRACKBALL_CONFIG_WIRE_LEN].copy_from_slice(&right);
-    out[TRACKBALL_CONFIG_WIRE_LEN..].copy_from_slice(&left);
+    out[TRACKBALL_CONFIG_WIRE_LEN..TRACKBALL_CONFIG_WIRE_LEN * 2].copy_from_slice(&left);
+
+    let mut offset = TRACKBALL_CONFIG_WIRE_LEN * 2;
+    for layer in 0..TRACKBALL_LAYER_COUNT as u8 {
+        for device_id in [RIGHT_TRACKBALL_ID, LEFT_TRACKBALL_ID] {
+            let (mode, gain, scroll_den, inertia) = layer_profile(layer, device_id);
+            let profile = [
+                mode as u8,
+                (gain & 0xff) as u8,
+                (gain >> 8) as u8,
+                scroll_den.min(255) as u8,
+                inertia as u8,
+                0,
+            ];
+            out[offset..offset + TRACKBALL_LAYER_PROFILE_WIRE_LEN].copy_from_slice(&profile);
+            offset += TRACKBALL_LAYER_PROFILE_WIRE_LEN;
+        }
+    }
     out
 }
 
@@ -158,9 +228,22 @@ pub fn apply_persisted_blob(data: &[u8; TRACKBALL_PERSISTED_LEN]) {
     let mut right = [0u8; TRACKBALL_CONFIG_WIRE_LEN];
     let mut left = [0u8; TRACKBALL_CONFIG_WIRE_LEN];
     right.copy_from_slice(&data[..TRACKBALL_CONFIG_WIRE_LEN]);
-    left.copy_from_slice(&data[TRACKBALL_CONFIG_WIRE_LEN..]);
+    left.copy_from_slice(&data[TRACKBALL_CONFIG_WIRE_LEN..TRACKBALL_CONFIG_WIRE_LEN * 2]);
     apply_config(RIGHT_TRACKBALL_ID, &right);
     apply_config(LEFT_TRACKBALL_ID, &left);
+
+    let mut offset = TRACKBALL_CONFIG_WIRE_LEN * 2;
+    for layer in 0..TRACKBALL_LAYER_COUNT as u8 {
+        for device_id in [RIGHT_TRACKBALL_ID, LEFT_TRACKBALL_ID] {
+            let p = &data[offset..offset + TRACKBALL_LAYER_PROFILE_WIRE_LEN];
+            let mode = if p[0] == 1 { TrackballMode::Scroll } else { TrackballMode::Cursor };
+            let gain = u16::from_le_bytes([p[1], p[2]]).clamp(16, 2048);
+            let scroll_den = (p[3] as u16).clamp(1, 64);
+            let inertia = p[4] != 0;
+            let _ = set_layer_profile(layer, device_id, mode, gain, scroll_den, inertia);
+            offset += TRACKBALL_LAYER_PROFILE_WIRE_LEN;
+        }
+    }
 }
 
 pub fn load_defaults() {
@@ -168,6 +251,22 @@ pub fn load_defaults() {
     let left  = [0xdc,0x03, 0x00,0x01, 0x06,0x00, 0x01, 0x0f,0x10, 0x01, 0x3f,0x01, 0x02,0x04, 0x00,0x00];
     apply_config(RIGHT_TRACKBALL_ID, &right);
     apply_config(LEFT_TRACKBALL_ID, &left);
+
+    let defaults = [
+        (TrackballMode::Cursor, 384, 6, false), (TrackballMode::Scroll, 256, 2, true),
+        (TrackballMode::Cursor, 128, 6, false), (TrackballMode::Cursor, 384, 6, false),
+        (TrackballMode::Scroll, 256, 2, true),  (TrackballMode::Scroll, 256, 6, true),
+    ];
+    for layer in 0..TRACKBALL_LAYER_COUNT as u8 {
+        for device_id in [RIGHT_TRACKBALL_ID, LEFT_TRACKBALL_ID] {
+            let index = layer as usize * 2 + device_id as usize;
+            let (mode, gain, den, inertia) = defaults
+                .get(index)
+                .copied()
+                .unwrap_or((TrackballMode::Cursor, 256, 6, false));
+            let _ = set_layer_profile(layer, device_id, mode, gain, den, inertia);
+        }
+    }
 }
 
 pub fn request_save() -> u16 {
@@ -237,6 +336,37 @@ pub fn handle_rynk_trackball(msg: &mut RynkMessage<'_>) -> Option<Result<(), Ryn
         RYNK_GET_TRACKBALL_STATE => {
             if let Err(error) = msg.decode_request::<()>() { return Some(Err(error)); }
             Some(msg.encode_response(&state_wire()))
+        }
+        RYNK_GET_LAYER_PROFILE => {
+            let request = match msg.decode_request::<[u8; 2]>() { Ok(value) => value, Err(error) => return Some(Err(error)) };
+            let layer = request[0];
+            let device_id = request[1];
+            if layer as usize >= TRACKBALL_LAYER_COUNT || device_id > LEFT_TRACKBALL_ID {
+                return Some(Err(RynkError::Malformed));
+            }
+            let (mode, gain, scroll_den, inertia) = layer_profile(layer, device_id);
+            let response = [
+                mode as u8,
+                (gain & 0xff) as u8,
+                (gain >> 8) as u8,
+                scroll_den.min(255) as u8,
+                inertia as u8,
+                0,
+            ];
+            Some(msg.encode_response(&response))
+        }
+        RYNK_SET_LAYER_PROFILE => {
+            let request = match msg.decode_request::<[u8; 8]>() { Ok(value) => value, Err(error) => return Some(Err(error)) };
+            let layer = request[0];
+            let device_id = request[1];
+            let mode = if request[2] == 1 { TrackballMode::Scroll } else { TrackballMode::Cursor };
+            let gain = u16::from_le_bytes([request[3], request[4]]).clamp(16, 2048);
+            let scroll_den = (request[5] as u16).clamp(1, 64);
+            let inertia = request[6] != 0;
+            if !set_layer_profile(layer, device_id, mode, gain, scroll_den, inertia) {
+                return Some(Err(RynkError::Malformed));
+            }
+            Some(msg.encode_response(&()))
         }
         _ => None,
     }
