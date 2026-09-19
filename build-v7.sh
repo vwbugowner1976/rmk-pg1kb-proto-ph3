@@ -3,6 +3,26 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Generate stock RMK keyboard.toml from the reusable JP-key source.
+# The helper repo is pinned for reproducible local builds and cached locally.
+JPKEYS_REV="957c97dda672346b550c8e86a8e82ec015962452"
+JPKEYS_DIR="$PWD/.cache/rmk-jpkeys-for-us-layout"
+JPKEYS_URL="https://github.com/vwbugowner1976/rmk-jpkeys-for-us-layout.git"
+
+if [ ! -d "$JPKEYS_DIR/.git" ]; then
+    rm -rf "$JPKEYS_DIR"
+    mkdir -p "$(dirname "$JPKEYS_DIR")"
+    git clone --filter=blob:none "$JPKEYS_URL" "$JPKEYS_DIR"
+fi
+
+if ! git -C "$JPKEYS_DIR" cat-file -e "$JPKEYS_REV^{commit}" 2>/dev/null; then
+    git -C "$JPKEYS_DIR" fetch --depth=1 origin "$JPKEYS_REV"
+fi
+git -C "$JPKEYS_DIR" checkout --detach --quiet "$JPKEYS_REV"
+
+python3 "$JPKEYS_DIR/tools/apply_jpkeys.py" keyboard.jp.toml keyboard.toml
+
+
 # Build against a project-local copy of the official crates.io RMK 0.9.0
 # source. This avoids mutating ~/.cargo/registry/src and guarantees Cargo sees
 # the PG1KB patches as a normal path dependency.
