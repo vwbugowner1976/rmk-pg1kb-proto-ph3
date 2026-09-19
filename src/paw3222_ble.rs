@@ -26,6 +26,8 @@ pub struct Paw3222BleProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> 
     last_init_error: Option<Paw3222Error>,
     accumulated_x: i32,
     accumulated_y: i32,
+    cursor_out_x_q8: i32,
+    cursor_out_y_q8: i32,
     wheel_accum_q8: i32,
     velocity_q8: i32,
     input_seen: bool,
@@ -51,6 +53,8 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             last_init_error: None,
             accumulated_x: 0,
             accumulated_y: 0,
+            cursor_out_x_q8: 0,
+            cursor_out_y_q8: 0,
             wheel_accum_q8: 0,
             velocity_q8: 0,
             input_seen: false,
@@ -70,6 +74,8 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
     fn reset_motion_state(&mut self) {
         self.accumulated_x = 0;
         self.accumulated_y = 0;
+        self.cursor_out_x_q8 = 0;
+        self.cursor_out_y_q8 = 0;
         self.wheel_accum_q8 = 0;
         self.velocity_q8 = 0;
         self.input_seen = false;
@@ -132,29 +138,31 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
     }
 
     fn send_cursor_report(&mut self) {
-        if self.accumulated_x == 0 && self.accumulated_y == 0 {
+        let cfg = runtime::config(self.id);
+        if self.accumulated_x != 0 || self.accumulated_y != 0 {
+            let (rot_x, rot_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
+            let gain_q8 = runtime::effective_cursor_gain_q8(self.id) as i32;
+            self.cursor_out_x_q8 = self.cursor_out_x_q8.saturating_add(rot_x.saturating_mul(gain_q8));
+            self.cursor_out_y_q8 = self.cursor_out_y_q8.saturating_add(rot_y.saturating_mul(gain_q8));
+            self.accumulated_x = 0;
+            self.accumulated_y = 0;
+            self.input_seen = false;
+        }
+
+        let whole_x = self.cursor_out_x_q8 / Q8_ONE;
+        let whole_y = self.cursor_out_y_q8 / Q8_ONE;
+        if whole_x == 0 && whole_y == 0 {
             self.last_report = Instant::now();
             return;
         }
 
-        let cfg = runtime::config(self.id);
-        let (rot_x, rot_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
-        let gain_q8 = runtime::effective_cursor_gain_q8(self.id) as i32;
-        let scaled_x = rot_x.saturating_mul(gain_q8) / Q8_ONE;
-        let scaled_y = rot_y.saturating_mul(gain_q8) / Q8_ONE;
-        let x = scaled_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let y = scaled_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let x = whole_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let y = whole_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let report = Report::MouseReport(MouseReport { buttons: 0, x, y, wheel: 0, pan: 0 });
 
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
-            if scaled_x.abs() <= i8::MAX as i32 && scaled_y.abs() <= i8::MAX as i32 {
-                self.accumulated_x = 0;
-                self.accumulated_y = 0;
-            } else {
-                self.accumulated_x /= 2;
-                self.accumulated_y /= 2;
-            }
-            self.input_seen = false;
+            self.cursor_out_x_q8 = self.cursor_out_x_q8.saturating_sub((x as i32).saturating_mul(Q8_ONE));
+            self.cursor_out_y_q8 = self.cursor_out_y_q8.saturating_sub((y as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
             self.last_report = Instant::now();
         } else {
