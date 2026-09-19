@@ -15,6 +15,8 @@ pub struct SplitPointingBleProcessor {
     device_id: u8,
     cursor_x: i32,
     cursor_y: i32,
+    cursor_out_x_q8: i32,
+    cursor_out_y_q8: i32,
     wheel_accum_q8: i32,
     velocity_q8: i32,
     input_seen: bool,
@@ -30,6 +32,8 @@ impl SplitPointingBleProcessor {
             device_id,
             cursor_x: 0,
             cursor_y: 0,
+            cursor_out_x_q8: 0,
+            cursor_out_y_q8: 0,
             wheel_accum_q8: 0,
             velocity_q8: 0,
             input_seen: false,
@@ -43,6 +47,8 @@ impl SplitPointingBleProcessor {
     fn reset_motion_state(&mut self) {
         self.cursor_x = 0;
         self.cursor_y = 0;
+        self.cursor_out_x_q8 = 0;
+        self.cursor_out_y_q8 = 0;
         self.wheel_accum_q8 = 0;
         self.velocity_q8 = 0;
         self.input_seen = false;
@@ -117,21 +123,24 @@ impl SplitPointingBleProcessor {
     }
 
     fn poll_cursor(&mut self) {
-        if self.cursor_x == 0 && self.cursor_y == 0 { return; }
-        let gain_q8 = runtime::effective_cursor_gain_q8(self.device_id) as i32;
-        let scaled_x = self.cursor_x.saturating_mul(gain_q8) / Q8_ONE;
-        let scaled_y = self.cursor_y.saturating_mul(gain_q8) / Q8_ONE;
-        let x = scaled_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let y = scaled_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        if self.cursor_x != 0 || self.cursor_y != 0 {
+            let gain_q8 = runtime::effective_cursor_gain_q8(self.device_id) as i32;
+            self.cursor_out_x_q8 = self.cursor_out_x_q8.saturating_add(self.cursor_x.saturating_mul(gain_q8));
+            self.cursor_out_y_q8 = self.cursor_out_y_q8.saturating_add(self.cursor_y.saturating_mul(gain_q8));
+            self.cursor_x = 0;
+            self.cursor_y = 0;
+        }
+
+        let whole_x = self.cursor_out_x_q8 / Q8_ONE;
+        let whole_y = self.cursor_out_y_q8 / Q8_ONE;
+        if whole_x == 0 && whole_y == 0 { return; }
+
+        let x = whole_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let y = whole_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let report = Report::MouseReport(MouseReport { buttons: 0, x, y, wheel: 0, pan: 0 });
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
-            if scaled_x.abs() <= i8::MAX as i32 && scaled_y.abs() <= i8::MAX as i32 {
-                self.cursor_x = 0;
-                self.cursor_y = 0;
-            } else {
-                self.cursor_x /= 2;
-                self.cursor_y /= 2;
-            }
+            self.cursor_out_x_q8 = self.cursor_out_x_q8.saturating_sub((x as i32).saturating_mul(Q8_ONE));
+            self.cursor_out_y_q8 = self.cursor_out_y_q8.saturating_sub((y as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
         } else {
             self.hid_busy = self.hid_busy.saturating_add(1);
