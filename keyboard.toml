@@ -68,19 +68,19 @@ __ __ __ __ __ __ __ Kp1 Kp2 Kp3 KpPlus KpMinus
 __ __ __ __ __ __ __ Kp0 __ KpDot KpEqual __
 """
 
+
 [behavior.fork]
 forks = [
-  # ZMK jp_minusunder: '-' normally, JIS '_' when shifted.
-  { trigger = "F13", negative_output = "Minus", positive_output = "WM(International1, LShift)", match_any = "LShift|RShift" },
-
-  # ZMK jp_equalplus: JIS '=' normally, JIS '+' when shifted.
-  { trigger = "F14", negative_output = "WM(Minus, LShift)", positive_output = "WM(Semicolon, LShift)", match_any = "LShift|RShift" },
-
-  # ZMK jp_quotedquote: JIS quote normally, JIS double quote when shifted.
+# BEGIN rmk-jpkeys-for-us-layout (generated)
+  # JP_QUOTEDQUOTE
   { trigger = "F15", negative_output = "WM(Kc7, LShift)", positive_output = "WM(Kc2, LShift)", match_any = "LShift|RShift" },
-
-  # ZMK jp_yenpipe: JIS yen normally, pipe when shifted.
-  { trigger = "F16", negative_output = "International3", positive_output = "WM(International3, LShift)", match_any = "LShift|RShift" }
+  # JP_EQUALPLUS
+  { trigger = "F14", negative_output = "WM(Minus, LShift)", positive_output = "WM(Semicolon, LShift)", match_any = "LShift|RShift" },
+  # JP_YENPIPE
+  { trigger = "F16", negative_output = "International3", positive_output = "WM(International3, LShift)", match_any = "LShift|RShift" },
+  # JP_MINUSUNDER
+  { trigger = "F13", negative_output = "Minus", positive_output = "WM(International1, LShift)", match_any = "LShift|RShift" },
+# END rmk-jpkeys-for-us-layout (generated)
 ]
 
 [ble]
