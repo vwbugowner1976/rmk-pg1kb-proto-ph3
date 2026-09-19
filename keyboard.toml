@@ -24,16 +24,19 @@ map = """
 #   LT(1, Language2) -> hold Num / tap Language2
 #   LT(2, Language1) -> hold Sym / tap Language1
 [keymap]
-layers = 3
+layers = 4
 
+# Defaults mirrored from the current PG1KB ZMK layout shown in My ZMK Studio.
+# The matrix is stored in RMK row/column order; MyKeebStudio renders it using
+# the PG1KB physical transform.
 [[keymap.layer]]
 name = "Base"
 keys = """
 MouseBtn2 MouseBtn1 No No No No MouseBtn3 MouseBtn1 No No No No
-T R E W MouseBtn4 Escape Y U I O MouseBtn5 Minus
-G F D S Q Tab H J K L P Equal
-B V C X A LCtrl N M Comma Dot Semicolon Quote
-LT(1, Language2) Space LGui LAlt Z LShift LT(2, Language1) Enter RCtrl RShift Slash Backslash
+T R E W Q Tab Y U I O Minus Minus
+G F D S A LCtrl H J K L P Equal
+B V C X Z LShift N M Comma Dot Semicolon Quote
+LT(1, Space) LT(2, Space) LGui LAlt LGui Grave LT(2, Language1) Enter RCtrl RShift Slash International3
 """
 
 [[keymap.layer]]
@@ -50,10 +53,20 @@ __ __ __ __ F1 __ __ __ __ __ F10 F11
 name = "Sym"
 keys = """
 __ __ No No No No __ __ No No No No
-WM(Kc5, LShift) WM(Kc4, LShift) WM(Kc3, LShift) WM(Kc2, LShift) WM(Kc1, LShift) Grave WM(Kc6, LShift) WM(Kc7, LShift) WM(Kc8, LShift) Home End F12
-LeftBracket WM(LeftBracket, LShift) __ __ WM(Slash, LShift) WM(Grave, LShift) RightBracket WM(RightBracket, LShift) __ __ PrintScreen __
-WM(Comma, LShift) WM(Kc9, LShift) __ __ __ __ WM(Dot, LShift) WM(Kc0, LShift) __ __ WM(Semicolon, LShift) WM(Quote, LShift)
-__ __ __ __ __ __ __ __ __ __ WM(Slash, LShift) WM(Backslash, LShift)
+WM(Kc5, LShift) WM(Kc4, LShift) WM(Kc3, LShift) LeftBracket WM(Kc1, LShift) WM(LeftBracket, LShift) Equal WM(Kc6, LShift) WM(Quote, LShift) Home End F12
+RightBracket WM(RightBracket, LShift) __ __ WM(Slash, LShift) WM(Equal, LShift) Backslash WM(Backslash, LShift) __ __ PrintScreen __
+WM(Comma, LShift) WM(Kc8, LShift) __ __ __ __ WM(Dot, LShift) WM(Kc9, LShift) __ __ Quote WM(Kc2, LShift)
+__ __ __ __ __ __ __ __ __ __ WM(Slash, LShift) WM(International3, LShift)
+"""
+
+[[keymap.layer]]
+name = "Sys"
+keys = """
+User10 User7 No No No No __ __ No No No No
+User4 User3 User2 User1 Reboot No __ Kp7 Kp8 Kp9 __ __
+__ __ __ __ User0 __ __ Kp4 Kp5 Kp6 KpAsterisk KpSlash
+__ __ __ __ __ __ __ Kp1 Kp2 Kp3 KpPlus KpMinus
+__ __ __ __ __ __ __ Kp0 __ KpDot KpEqual __
 """
 
 [ble]
@@ -90,3 +103,4 @@ col_pins = ["P0_02", "P0_03", "P0_28", "P0_29", "P0_04", "P1_11"]
 
 [rmk]
 split_peripherals_num = 1
+ble_profiles_num = 5
