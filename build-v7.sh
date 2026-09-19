@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 # Generate stock RMK keyboard.toml from the reusable JP-key source.
 # The helper repo is pinned for reproducible local builds and cached locally.
-JPKEYS_REV="957c97dda672346b550c8e86a8e82ec015962452"
+JPKEYS_REV="2507c18f5d5526b12cf0bc75eb5796e2aeda8612"
 JPKEYS_DIR="$PWD/.cache/rmk-jpkeys-for-us-layout"
 JPKEYS_URL="https://github.com/vwbugowner1976/rmk-jpkeys-for-us-layout.git"
 
