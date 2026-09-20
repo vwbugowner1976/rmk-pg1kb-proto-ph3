@@ -159,10 +159,10 @@ impl SplitPointingBleProcessor {
                 // if the HID path has been idle long enough, flush immediately to
                 // avoid the average half-period delay of the 8 ms poll. When events
                 // arrive too quickly, keep accumulating and let the poll flush them.
-                // The 6 ms guard inside flush_cursor_report() still prevents retry storms.
+                // The 5 ms guard inside flush_cursor_report() still prevents retry storms.
                 let can_flush_now = self
                     .last_hid_attempt
-                    .map(|last| last.elapsed() >= Duration::from_millis(6))
+                    .map(|last| last.elapsed() >= Duration::from_millis(5))
                     .unwrap_or(true);
                 if can_flush_now {
                     self.flush_cursor_report();
@@ -266,7 +266,7 @@ impl SplitPointingBleProcessor {
         // delayed by BLE/event work. Rate-limit queue attempts as well as successful
         // reports so those catch-up ticks cannot hammer BLE_REPORT_CHANNEL.
         if let Some(last_attempt) = self.last_hid_attempt {
-            if last_attempt.elapsed() < Duration::from_millis(6) {
+            if last_attempt.elapsed() < Duration::from_millis(5) {
                 return;
             }
         }
