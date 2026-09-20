@@ -34,8 +34,6 @@ pub struct SplitPointingBleProcessor {
     rx_dt_max_us: u64,
     rx_batch_sum: u64,
     rx_batch_max: u32,
-    last_wire_x: Option<i16>,
-    last_wire_y: Option<i16>,
     pending_rx_started: Option<Instant>,
     last_hid: Option<Instant>,
     last_hid_attempt: Option<Instant>,
@@ -74,8 +72,6 @@ impl SplitPointingBleProcessor {
             rx_dt_max_us: 0,
             rx_batch_sum: 0,
             rx_batch_max: 0,
-            last_wire_x: None,
-            last_wire_y: None,
             pending_rx_started: None,
             last_hid: None,
             last_hid_attempt: None,
@@ -131,35 +127,14 @@ impl SplitPointingBleProcessor {
         self.last_rx = Some(rx_now);
         self.rx_count_window = self.rx_count_window.saturating_add(1);
 
-        let mut wire_x: i16 = 0;
-        let mut wire_y: i16 = 0;
+        let mut raw_x: i32 = 0;
+        let mut raw_y: i32 = 0;
         for axis in event.axes {
             match axis.axis {
-                Axis::X => wire_x = axis.value,
-                Axis::Y => wire_y = axis.value,
+                Axis::X => raw_x = raw_x.saturating_add(axis.value as i32),
+                Axis::Y => raw_y = raw_y.saturating_add(axis.value as i32),
                 _ => {}
             }
-        }
-
-        let (raw_x, raw_y) = match (self.last_wire_x, self.last_wire_y) {
-            (Some(last_x), Some(last_y)) => (
-                wire_x.wrapping_sub(last_x) as i32,
-                wire_y.wrapping_sub(last_y) as i32,
-            ),
-            _ => {
-                self.last_wire_x = Some(wire_x);
-                self.last_wire_y = Some(wire_y);
-                return;
-            }
-        };
-        self.last_wire_x = Some(wire_x);
-        self.last_wire_y = Some(wire_y);
-
-        // A peripheral reset would look like an enormous wrapped delta. Treat
-        // implausibly large one-frame jumps as a new baseline instead of moving
-        // the cursor across the screen.
-        if raw_x.abs() > 4096 || raw_y.abs() > 4096 {
-            return;
         }
 
         let batch = raw_x.abs().saturating_add(raw_y.abs()) as u32;
