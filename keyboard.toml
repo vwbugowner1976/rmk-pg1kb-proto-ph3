@@ -120,3 +120,4 @@ col_pins = ["P1_11", "P0_04", "P0_29", "P0_28", "P0_03", "P0_02"]
 [rmk]
 split_peripherals_num = 1
 ble_profiles_num = 5
+custom_message_max_size = 8
