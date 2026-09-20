@@ -18,12 +18,12 @@ lib = Path(sys.argv[2])
 
 cargo_text = cargo.read_text()
 if 'custom_message = [' not in cargo_text and 'custom_message = []' not in cargo_text:
-    marker = '## Enable the storage. The storage is optional to save memory\nstorage = ['
+    marker = '[features]\n'
     if marker not in cargo_text:
-        raise SystemExit(f"Could not find RMK feature insertion point in {cargo}")
+        raise SystemExit(f"Could not find [features] in {cargo}")
     cargo_text = cargo_text.replace(
         marker,
-        '## Enable PG1KB custom split motion messages.\ncustom_message = []\n\n' + marker,
+        marker + 'custom_message = []\n',
         1,
     )
     cargo.write_text(cargo_text)
