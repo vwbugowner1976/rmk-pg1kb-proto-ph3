@@ -36,6 +36,7 @@ pub struct SplitPointingBleProcessor {
     rx_batch_max: u32,
     pending_rx_started: Option<Instant>,
     last_hid: Option<Instant>,
+    last_hid_attempt: Option<Instant>,
     hid_count_window: u32,
     hid_dt_samples: u32,
     hid_dt_sum_us: u64,
@@ -73,6 +74,7 @@ impl SplitPointingBleProcessor {
             rx_batch_max: 0,
             pending_rx_started: None,
             last_hid: None,
+            last_hid_attempt: None,
             hid_count_window: 0,
             hid_dt_samples: 0,
             hid_dt_sum_us: 0,
@@ -247,6 +249,15 @@ impl SplitPointingBleProcessor {
             self.cursor_y = 0;
         }
 
+        // Embassy Ticker may catch up with several immediate ticks after the task was
+        // delayed by BLE/event work. Rate-limit queue attempts as well as successful
+        // reports so those catch-up ticks cannot hammer BLE_REPORT_CHANNEL.
+        if let Some(last_attempt) = self.last_hid_attempt {
+            if last_attempt.elapsed() < Duration::from_millis(6) {
+                return;
+            }
+        }
+
         let whole_x = self.cursor_out_x_q8 / Q8_ONE;
         let whole_y = self.cursor_out_y_q8 / Q8_ONE;
         if whole_x == 0 && whole_y == 0 { return; }
@@ -254,6 +265,7 @@ impl SplitPointingBleProcessor {
         let x = whole_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let y = whole_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let report = Report::MouseReport(MouseReport { buttons: 0, x, y, wheel: 0, pan: 0 });
+        self.last_hid_attempt = Some(Instant::now());
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
             let hid_now = Instant::now();
             if let Some(last) = self.last_hid {
