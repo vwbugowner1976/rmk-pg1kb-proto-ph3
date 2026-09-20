@@ -1,6 +1,6 @@
 use embassy_time::{Duration, Instant};
 use rmk::channel::BLE_REPORT_CHANNEL;
-use rmk::event::{Axis, PointingEvent};
+use rmk::custom_message::CustomMessage;
 use rmk::hid::Report;
 use rmk::macros::processor;
 use usbd_hid::descriptor::MouseReport;
@@ -11,8 +11,9 @@ const INERTIA_DIV: i32 = 16;
 const STOP_VELOCITY_Q8: i32 = 4;
 const Q8_ONE: i32 = 256;
 const DIAG_INTERVAL_MS: u64 = 1000;
+const RAW_MOTION_MAGIC: u8 = 0xA7;
 
-#[processor(subscribe = [PointingEvent], poll_interval = 8)]
+#[processor(subscribe = [CustomMessage], poll_interval = 8)]
 pub struct SplitPointingBleProcessor {
     device_id: u8,
     cursor_x: i32,
@@ -34,6 +35,8 @@ pub struct SplitPointingBleProcessor {
     rx_dt_max_us: u64,
     rx_batch_sum: u64,
     rx_batch_max: u32,
+    last_sequence: Option<u8>,
+    sequence_gaps: u32,
     pending_rx_started: Option<Instant>,
     last_hid: Option<Instant>,
     hid_count_window: u32,
@@ -71,6 +74,8 @@ impl SplitPointingBleProcessor {
             rx_dt_max_us: 0,
             rx_batch_sum: 0,
             rx_batch_max: 0,
+            last_sequence: None,
+            sequence_gaps: 0,
             pending_rx_started: None,
             last_hid: None,
             hid_count_window: 0,
@@ -107,8 +112,22 @@ impl SplitPointingBleProcessor {
         mode
     }
 
-    async fn on_pointing_event(&mut self, event: PointingEvent) {
-        if event.device_id != self.device_id { return; }
+    async fn on_custom_message(&mut self, message: CustomMessage) {
+        if message.data.len() != 6 || message.data[0] != RAW_MOTION_MAGIC {
+            return;
+        }
+
+        let sequence = message.data[1];
+        if let Some(last) = self.last_sequence {
+            let expected = last.wrapping_add(1);
+            if sequence != expected {
+                self.sequence_gaps = self.sequence_gaps.saturating_add(sequence.wrapping_sub(expected) as u32);
+            }
+        }
+        self.last_sequence = Some(sequence);
+
+        let raw_x = i16::from_le_bytes([message.data[2], message.data[3]]) as i32;
+        let raw_y = i16::from_le_bytes([message.data[4], message.data[5]]) as i32;
 
         let rx_now = Instant::now();
         if let Some(last) = self.last_rx {
@@ -125,16 +144,6 @@ impl SplitPointingBleProcessor {
         self.last_rx = Some(rx_now);
         self.rx_count_window = self.rx_count_window.saturating_add(1);
 
-        let mut raw_x: i32 = 0;
-        let mut raw_y: i32 = 0;
-        for axis in event.axes {
-            match axis.axis {
-                Axis::X => raw_x = raw_x.saturating_add(axis.value as i32),
-                Axis::Y => raw_y = raw_y.saturating_add(axis.value as i32),
-                _ => {}
-            }
-        }
-
         let batch = raw_x.abs().saturating_add(raw_y.abs()) as u32;
         self.rx_batch_sum = self.rx_batch_sum.saturating_add(batch as u64);
         self.rx_batch_max = self.rx_batch_max.max(batch);
@@ -143,9 +152,6 @@ impl SplitPointingBleProcessor {
         let (logical_x, logical_y) = runtime::effective_rotation(self.device_id).apply(raw_x, raw_y);
         match self.sync_mode() {
             TrackballMode::Cursor => {
-                // Left-side split events already arrive at roughly one BLE connection interval.
-                // Emit the HID report immediately instead of waiting for the separate 8 ms poll;
-                // this removes phase jitter unique to the left path. Right-side processing is untouched.
                 let gain_q8 = runtime::effective_cursor_gain_q8(self.device_id) as i32;
                 self.cursor_out_x_q8 = self.cursor_out_x_q8.saturating_add(logical_x.saturating_mul(gain_q8));
                 self.cursor_out_y_q8 = self.cursor_out_y_q8.saturating_add(logical_y.saturating_mul(gain_q8));
@@ -198,13 +204,14 @@ impl SplitPointingBleProcessor {
             let hid_dt_avg_us = if self.hid_dt_samples == 0 { 0 } else { self.hid_dt_sum_us / self.hid_dt_samples as u64 };
             let rx_to_hid_avg_us = if self.rx_to_hid_samples == 0 { 0 } else { self.rx_to_hid_sum_us / self.rx_to_hid_samples as u64 };
             log::info!(
-                "LEFT split diag rx_win={} rx_dt_us_min={} avg={} max={} rx_batch_avg={} max={} hid_win={} hid_total={} hid_dt_us_min={} avg={} max={} rx_to_hid_us_min={} avg={} max={} busy={}",
+                "LEFT raw diag rx_win={} rx_dt_us_min={} avg={} max={} rx_batch_avg={} max={} seq_gap={} hid_win={} hid_total={} hid_dt_us_min={} avg={} max={} rx_to_hid_us_min={} avg={} max={} busy={}",
                 self.rx_count_window,
                 self.rx_dt_min_us,
                 rx_dt_avg_us,
                 self.rx_dt_max_us,
                 rx_batch_avg,
                 self.rx_batch_max,
+                self.sequence_gaps,
                 self.hid_count_window,
                 self.hid_reports,
                 self.hid_dt_min_us,
@@ -222,6 +229,7 @@ impl SplitPointingBleProcessor {
             self.rx_dt_max_us = 0;
             self.rx_batch_sum = 0;
             self.rx_batch_max = 0;
+            self.sequence_gaps = 0;
             self.hid_count_window = 0;
             self.hid_dt_samples = 0;
             self.hid_dt_sum_us = 0;
