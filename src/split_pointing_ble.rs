@@ -154,6 +154,19 @@ impl SplitPointingBleProcessor {
                 if self.pending_rx_started.is_none() {
                     self.pending_rx_started = Some(rx_now);
                 }
+
+                // Hybrid left-side pacing:
+                // if the HID path has been idle long enough, flush immediately to
+                // avoid the average half-period delay of the 8 ms poll. When events
+                // arrive too quickly, keep accumulating and let the poll flush them.
+                // The 6 ms guard inside flush_cursor_report() still prevents retry storms.
+                let can_flush_now = self
+                    .last_hid_attempt
+                    .map(|last| last.elapsed() >= Duration::from_millis(6))
+                    .unwrap_or(true);
+                if can_flush_now {
+                    self.flush_cursor_report();
+                }
             }
             TrackballMode::Scroll => {
                 if logical_y == 0 { return; }
