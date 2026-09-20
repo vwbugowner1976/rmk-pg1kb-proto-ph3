@@ -2,7 +2,8 @@ use embassy_time::{Duration, Instant};
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal_async::spi::SpiBus;
 use log::{error, info, warn};
-use rmk::event::{Axis, AxisEvent, AxisValType, PointingEvent, PointingSetCpiEvent, publish_event};
+use rmk::custom_message::{CustomMessage, CustomMessageTarget, send};
+use rmk::event::PointingSetCpiEvent;
 use rmk::macros::processor;
 
 use crate::paw3222::{MotionDelta, Paw3222, Paw3222Error};
@@ -11,6 +12,7 @@ use crate::paw3222::{MotionDelta, Paw3222, Paw3222Error};
 // faster than the link can deliver. The central now emits left cursor HID immediately.
 const REPORT_INTERVAL_MS: u64 = 8;
 const DIAG_INTERVAL_MS: u64 = 1000;
+const RAW_MOTION_MAGIC: u8 = 0xA7;
 
 #[processor(subscribe = [PointingSetCpiEvent], poll_interval = 1)]
 pub struct Paw3222SplitProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> {
@@ -36,6 +38,7 @@ pub struct Paw3222SplitProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin
     publish_dt_max_us: u64,
     publish_batch_sum: u64,
     publish_batch_max: u32,
+    raw_sequence: u8,
 }
 
 impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI, CS, MotionPin> {
@@ -63,6 +66,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI,
             publish_dt_max_us: 0,
             publish_batch_sum: 0,
             publish_batch_max: 0,
+            raw_sequence: 0,
         }
     }
 
@@ -168,14 +172,16 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI,
         self.publish_batch_sum = self.publish_batch_sum.saturating_add(batch as u64);
         self.publish_batch_max = self.publish_batch_max.max(batch);
 
-        publish_event(PointingEvent {
-            device_id: self.id,
-            axes: [
-                AxisEvent { typ: AxisValType::Rel, axis: Axis::X, value: x },
-                AxisEvent { typ: AxisValType::Rel, axis: Axis::Y, value: y },
-                AxisEvent { typ: AxisValType::Rel, axis: Axis::Z, value: 0 },
-            ],
-        });
+        // Left trackball only: bypass RMK's generic SplitMessage::Pointing path.
+        // The dedicated custom-message characteristic is independent from key/pointing
+        // SplitMessage traffic and uses an unconfirmed BLE notification.
+        let xb = x.to_le_bytes();
+        let yb = y.to_le_bytes();
+        let packet = [RAW_MOTION_MAGIC, self.raw_sequence, xb[0], xb[1], yb[0], yb[1]];
+        if let Ok(message) = CustomMessage::new(&packet, CustomMessageTarget::Central) {
+            send(message);
+            self.raw_sequence = self.raw_sequence.wrapping_add(1);
+        }
 
         self.accumulated_x -= x as i32;
         self.accumulated_y -= y as i32;
