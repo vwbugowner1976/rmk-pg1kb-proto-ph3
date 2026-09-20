@@ -21,6 +21,8 @@ pub struct Paw3222SplitProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin
     last_init_error: Option<Paw3222Error>,
     accumulated_x: i32,
     accumulated_y: i32,
+    wire_x: i16,
+    wire_y: i16,
     last_delta: MotionDelta,
     sensor_reads: u32,
     motion_events: u32,
@@ -48,6 +50,8 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI,
             last_init_error: None,
             accumulated_x: 0,
             accumulated_y: 0,
+            wire_x: 0,
+            wire_y: 0,
             last_delta: MotionDelta::default(),
             sensor_reads: 0,
             motion_events: 0,
@@ -92,6 +96,8 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI,
                     self.last_delta = delta;
                     self.accumulated_x = self.accumulated_x.saturating_add(delta.x as i32);
                     self.accumulated_y = self.accumulated_y.saturating_add(delta.y as i32);
+                    self.wire_x = self.wire_x.wrapping_add(delta.x);
+                    self.wire_y = self.wire_y.wrapping_add(delta.y);
                 }
                 Ok(None) => {}
                 Err(_) => self.read_errors = self.read_errors.saturating_add(1),
@@ -168,11 +174,15 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222SplitProcessor<SPI,
         self.publish_batch_sum = self.publish_batch_sum.saturating_add(batch as u64);
         self.publish_batch_max = self.publish_batch_max.max(batch);
 
+        // Send cumulative 16-bit motion counters. The central converts them back
+        // to deltas with wrapping subtraction. If one BLE Pointing packet is
+        // dropped by the bounded-latency transport, the next packet recovers the
+        // missing motion instead of permanently shifting the cursor path.
         publish_event(PointingEvent {
             device_id: self.id,
             axes: [
-                AxisEvent { typ: AxisValType::Rel, axis: Axis::X, value: x },
-                AxisEvent { typ: AxisValType::Rel, axis: Axis::Y, value: y },
+                AxisEvent { typ: AxisValType::Rel, axis: Axis::X, value: self.wire_x },
+                AxisEvent { typ: AxisValType::Rel, axis: Axis::Y, value: self.wire_y },
                 AxisEvent { typ: AxisValType::Rel, axis: Axis::Z, value: 0 },
             ],
         });
