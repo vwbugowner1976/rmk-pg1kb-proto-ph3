@@ -20,7 +20,6 @@ rmk = { path = ".rmk-patched/rmk-0.9.0", default-features = false, features = [
     "adafruit_bl",
     "usb_log",
     "rynk",
-    "custom_message",
 ] }
 nrf-sdc = { version = "0.4.0", features = [
     "defmt",
