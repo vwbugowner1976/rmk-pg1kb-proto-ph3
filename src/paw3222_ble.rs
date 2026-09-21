@@ -130,7 +130,8 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         if self.ready && self.last_report.elapsed() >= Duration::from_millis(REPORT_INTERVAL_MS) {
             match self.sync_mode() {
                 TrackballMode::Cursor => self.send_cursor_report(),
-                TrackballMode::Scroll => self.send_scroll_report(),
+                TrackballMode::Scroll => self.send_scroll_report(false),
+                TrackballMode::HorizontalScroll => self.send_scroll_report(true),
             }
         }
 
@@ -170,19 +171,20 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         }
     }
 
-    fn send_scroll_report(&mut self) {
+    fn send_scroll_report(&mut self, horizontal: bool) {
         let cfg = runtime::config(self.id);
         let had_input = self.input_seen && (self.accumulated_x != 0 || self.accumulated_y != 0);
 
         if had_input {
-            let (_logical_x, logical_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
+            let (logical_x, logical_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
             self.accumulated_x = 0;
             self.accumulated_y = 0;
             self.input_seen = false;
 
-            if logical_y != 0 {
-                let incoming_direction = if logical_y > 0 { 1 } else { -1 };
-                let magnitude = logical_y.abs();
+            let logical_axis = if horizontal { logical_x } else { logical_y };
+            if logical_axis != 0 {
+                let incoming_direction = if logical_axis > 0 { 1 } else { -1 };
+                let magnitude = logical_axis.abs();
                 let noise = cfg.direction_noise_threshold() as i32;
                 let reverse = cfg.direction_reverse_threshold() as i32;
                 if self.direction == 0 {
@@ -219,10 +221,16 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             self.last_report = Instant::now();
             return;
         }
-        let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let report = Report::MouseReport(MouseReport { buttons: rmk::channel::mouse_button_state(), x: 0, y: 0, wheel, pan: 0 });
+        let scroll = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let report = Report::MouseReport(MouseReport {
+            buttons: rmk::channel::mouse_button_state(),
+            x: 0,
+            y: 0,
+            wheel: if horizontal { 0 } else { scroll },
+            pan: if horizontal { scroll } else { 0 },
+        });
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
-            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
+            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((scroll as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
             self.last_report = Instant::now();
         } else {
