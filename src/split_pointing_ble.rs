@@ -20,9 +20,13 @@ pub struct SplitPointingBleProcessor {
     cursor_out_x_q8: i32,
     cursor_out_y_q8: i32,
     wheel_accum_q8: i32,
-    velocity_q8: i32,
-    input_seen: bool,
-    direction: i8,
+    pan_accum_q8: i32,
+    wheel_velocity_q8: i32,
+    pan_velocity_q8: i32,
+    wheel_input_seen: bool,
+    pan_input_seen: bool,
+    wheel_direction: i8,
+    pan_direction: i8,
     last_mode: u8,
     hid_reports: u32,
     hid_busy: u32,
@@ -58,9 +62,13 @@ impl SplitPointingBleProcessor {
             cursor_out_x_q8: 0,
             cursor_out_y_q8: 0,
             wheel_accum_q8: 0,
-            velocity_q8: 0,
-            input_seen: false,
-            direction: 0,
+            pan_accum_q8: 0,
+            wheel_velocity_q8: 0,
+            pan_velocity_q8: 0,
+            wheel_input_seen: false,
+            pan_input_seen: false,
+            wheel_direction: 0,
+            pan_direction: 0,
             last_mode: runtime::effective_mode(device_id) as u8,
             hid_reports: 0,
             hid_busy: 0,
@@ -94,9 +102,13 @@ impl SplitPointingBleProcessor {
         self.cursor_out_x_q8 = 0;
         self.cursor_out_y_q8 = 0;
         self.wheel_accum_q8 = 0;
-        self.velocity_q8 = 0;
-        self.input_seen = false;
-        self.direction = 0;
+        self.pan_accum_q8 = 0;
+        self.wheel_velocity_q8 = 0;
+        self.pan_velocity_q8 = 0;
+        self.wheel_input_seen = false;
+        self.pan_input_seen = false;
+        self.wheel_direction = 0;
+        self.pan_direction = 0;
         self.pending_rx_started = None;
     }
 
@@ -168,42 +180,100 @@ impl SplitPointingBleProcessor {
                     self.flush_cursor_report();
                 }
             }
-            mode @ (TrackballMode::Scroll | TrackballMode::HorizontalScroll) => {
-                let logical_axis = if matches!(mode, TrackballMode::HorizontalScroll) { logical_x } else { logical_y };
-                if logical_axis == 0 { return; }
-                let incoming_direction: i8 = if logical_axis > 0 { 1 } else { -1 };
-                let magnitude = logical_axis.abs();
+            TrackballMode::Scroll => {
+                let inertia_enabled = runtime::effective_inertia_enabled(self.device_id);
                 let noise = cfg.direction_noise_threshold() as i32;
                 let reverse = cfg.direction_reverse_threshold() as i32;
 
-                if self.direction == 0 {
-                    if magnitude < noise { return; }
-                    self.direction = incoming_direction;
-                } else if incoming_direction != self.direction {
-                    if magnitude < reverse { return; }
-                    self.direction = incoming_direction;
-                    self.wheel_accum_q8 = 0;
-                    self.velocity_q8 = 0;
+                if Self::update_scroll_axis(
+                    logical_y,
+                    runtime::effective_scroll_scale_den(self.device_id) as i32,
+                    inertia_enabled,
+                    noise,
+                    reverse,
+                    &mut self.wheel_accum_q8,
+                    &mut self.wheel_velocity_q8,
+                    &mut self.wheel_direction,
+                ) {
+                    self.wheel_input_seen = true;
                 }
 
-                let stable_y = magnitude.saturating_mul(self.direction as i32);
-                let scale_den = runtime::effective_scroll_scale_den(self.device_id) as i32;
-                let scroll_q8 = stable_y.saturating_mul(Q8_ONE) / scale_den;
-                self.wheel_accum_q8 = self.wheel_accum_q8.saturating_add(scroll_q8);
-                if runtime::effective_inertia_enabled(self.device_id) {
-                    self.velocity_q8 = scroll_q8 / INERTIA_DIV;
-                } else {
-                    self.velocity_q8 = 0;
+                if Self::update_scroll_axis(
+                    logical_x,
+                    runtime::effective_horizontal_scroll_scale_den(self.device_id) as i32,
+                    inertia_enabled,
+                    noise,
+                    reverse,
+                    &mut self.pan_accum_q8,
+                    &mut self.pan_velocity_q8,
+                    &mut self.pan_direction,
+                ) {
+                    self.pan_input_seen = true;
                 }
-                self.input_seen = true;
             }
+        }
+    }
+
+    fn update_scroll_axis(
+        input: i32,
+        scale_den: i32,
+        inertia_enabled: bool,
+        noise: i32,
+        reverse: i32,
+        accum_q8: &mut i32,
+        velocity_q8: &mut i32,
+        direction: &mut i8,
+    ) -> bool {
+        if input == 0 {
+            return false;
+        }
+
+        let incoming_direction = if input > 0 { 1 } else { -1 };
+        let magnitude = input.abs();
+        if *direction == 0 {
+            if magnitude < noise {
+                return false;
+            }
+            *direction = incoming_direction;
+        } else if incoming_direction != *direction {
+            if magnitude < reverse {
+                return false;
+            }
+            *direction = incoming_direction;
+            *accum_q8 = 0;
+            *velocity_q8 = 0;
+        }
+
+        let stable = magnitude.saturating_mul(*direction as i32);
+        let scroll_q8 = stable.saturating_mul(Q8_ONE) / scale_den.max(1);
+        *accum_q8 = accum_q8.saturating_add(scroll_q8);
+        *velocity_q8 = if inertia_enabled { scroll_q8 / INERTIA_DIV } else { 0 };
+        true
+    }
+
+    fn advance_scroll_inertia(
+        accum_q8: &mut i32,
+        velocity_q8: &mut i32,
+        direction: &mut i8,
+        decay_num: u8,
+        decay_den: u8,
+    ) {
+        if *velocity_q8 == 0 {
+            *direction = 0;
+            return;
+        }
+        *accum_q8 = accum_q8.saturating_add(*velocity_q8);
+        *velocity_q8 = velocity_q8.saturating_mul(decay_num as i32) / decay_den.max(1) as i32;
+        if velocity_q8.abs() < STOP_VELOCITY_Q8 {
+            *velocity_q8 = 0;
+            *direction = 0;
         }
     }
 
     async fn poll(&mut self) {
         match self.sync_mode() {
             TrackballMode::Cursor => self.poll_cursor(),
-            TrackballMode::Scroll | TrackballMode::HorizontalScroll => self.poll_scroll(),
+            TrackballMode::Scroll => self.poll_scroll(),
         }
 
         if self.last_diag.elapsed() >= Duration::from_millis(DIAG_INTERVAL_MS) {
@@ -316,37 +386,59 @@ impl SplitPointingBleProcessor {
 
     fn poll_scroll(&mut self) {
         let cfg = runtime::config(self.device_id);
-        if self.input_seen {
-            self.input_seen = false;
-        } else if runtime::effective_inertia_enabled(self.device_id) && self.velocity_q8 != 0 {
-            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_add(self.velocity_q8);
-            let (decay_num, decay_den) = cfg.inertia_decay();
-            self.velocity_q8 = self.velocity_q8.saturating_mul(decay_num as i32) / decay_den as i32;
-            if self.velocity_q8.abs() < STOP_VELOCITY_Q8 {
-                self.velocity_q8 = 0;
-                self.direction = 0;
-            }
+        let inertia_enabled = runtime::effective_inertia_enabled(self.device_id);
+        let (decay_num, decay_den) = cfg.inertia_decay();
+
+        if self.wheel_input_seen {
+            self.wheel_input_seen = false;
+        } else if inertia_enabled {
+            Self::advance_scroll_inertia(
+                &mut self.wheel_accum_q8,
+                &mut self.wheel_velocity_q8,
+                &mut self.wheel_direction,
+                decay_num,
+                decay_den,
+            );
         } else {
-            self.velocity_q8 = 0;
-            self.direction = 0;
+            self.wheel_velocity_q8 = 0;
+            self.wheel_direction = 0;
+        }
+
+        if self.pan_input_seen {
+            self.pan_input_seen = false;
+        } else if inertia_enabled {
+            Self::advance_scroll_inertia(
+                &mut self.pan_accum_q8,
+                &mut self.pan_velocity_q8,
+                &mut self.pan_direction,
+                decay_num,
+                decay_den,
+            );
+        } else {
+            self.pan_velocity_q8 = 0;
+            self.pan_direction = 0;
         }
 
         let wheel_steps = self.wheel_accum_q8 / Q8_ONE;
-        if wheel_steps == 0 { return; }
-        let scroll = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let horizontal = matches!(runtime::effective_mode(self.device_id), TrackballMode::HorizontalScroll);
+        let pan_steps = self.pan_accum_q8 / Q8_ONE;
+        if wheel_steps == 0 && pan_steps == 0 { return; }
+
+        let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let pan = pan_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let report = Report::MouseReport(MouseReport {
             buttons: rmk::channel::mouse_button_state(),
             x: 0,
             y: 0,
-            wheel: if horizontal { 0 } else { scroll },
-            pan: if horizontal { scroll } else { 0 },
+            wheel,
+            pan,
         });
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
-            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((scroll as i32).saturating_mul(Q8_ONE));
+            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
+            self.pan_accum_q8 = self.pan_accum_q8.saturating_sub((pan as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
         } else {
             self.hid_busy = self.hid_busy.saturating_add(1);
         }
     }
+
 }
