@@ -22,6 +22,14 @@ git -C "$JPKEYS_DIR" checkout --detach --quiet "$JPKEYS_REV"
 
 python3 "$JPKEYS_DIR/tools/apply_jpkeys.py" keyboard.jp.toml keyboard.toml --runtime-abi
 
+# Runtime keymap editing can assign any JP morph after flashing. Refuse to build
+# if even one stable ABI trigger is missing from the generated firmware config.
+for trigger in F13 F14 F15 F16 F17 F18 F19 F20; do
+    if ! grep -Fq "trigger = \"$trigger\"" keyboard.toml; then
+        echo "JP runtime ABI generation failed: missing $trigger fork" >&2
+        exit 1
+    fi
+done
 
 # Build against a project-local copy of the official crates.io RMK 0.9.0
 # source. This avoids mutating ~/.cargo/registry/src and guarantees Cargo sees
