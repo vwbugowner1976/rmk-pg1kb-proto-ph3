@@ -37,7 +37,9 @@ pub enum TrackballMode {
 
 impl TrackballMode {
     const fn from_wire(raw: u8) -> Self {
-        if raw & 0x01 != 0 { Self::Scroll } else { Self::Cursor }
+        // raw == 2 was the short-lived horizontal-only mode. Treat it as 2D
+        // Scroll so profiles saved during that revision remain usable.
+        if raw == 2 || raw & 0x01 != 0 { Self::Scroll } else { Self::Cursor }
     }
 }
 
