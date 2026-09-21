@@ -158,7 +158,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
 
         let x = whole_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let y = whole_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let report = Report::MouseReport(MouseReport { buttons: 0, x, y, wheel: 0, pan: 0 });
+        let report = Report::MouseReport(MouseReport { buttons: rmk::channel::mouse_button_state(), x, y, wheel: 0, pan: 0 });
 
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
             self.cursor_out_x_q8 = self.cursor_out_x_q8.saturating_sub((x as i32).saturating_mul(Q8_ONE));
@@ -220,7 +220,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             return;
         }
         let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let report = Report::MouseReport(MouseReport { buttons: 0, x: 0, y: 0, wheel, pan: 0 });
+        let report = Report::MouseReport(MouseReport { buttons: rmk::channel::mouse_button_state(), x: 0, y: 0, wheel, pan: 0 });
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
             self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
