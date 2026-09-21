@@ -33,6 +33,31 @@ pub const SAVE_FAILED: u8 = 3;
 pub enum TrackballMode {
     Cursor = 0,
     Scroll = 1,
+    HorizontalScroll = 2,
+}
+
+impl TrackballMode {
+    const fn packed_scroll_bit(self) -> u32 {
+        match self {
+            Self::Cursor => 0,
+            Self::Scroll | Self::HorizontalScroll => 1,
+        }
+    }
+
+    const fn packed_horizontal_bit(self) -> u32 {
+        match self {
+            Self::HorizontalScroll => 1,
+            Self::Cursor | Self::Scroll => 0,
+        }
+    }
+
+    const fn from_wire(raw: u8) -> Self {
+        match raw {
+            1 => Self::Scroll,
+            2 => Self::HorizontalScroll,
+            _ => Self::Cursor,
+        }
+    }
 }
 
 static SAVE_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -42,15 +67,22 @@ static SAVE_STATUS: AtomicU8 = AtomicU8::new(SAVE_IDLE);
 static ACTIVE_LAYER: AtomicU8 = AtomicU8::new(0);
 
 fn pack_layer_profile(mode: TrackballMode, gain_q8: u16, scroll_den: u16, inertia: bool, rotation: SensorRotation) -> u32 {
-    (mode as u32)
+    mode.packed_scroll_bit()
         | ((gain_q8.min(2047) as u32) << 1)
         | ((scroll_den.clamp(1, 63) as u32) << 12)
         | ((inertia as u32) << 18)
         | ((rotation.raw() as u32) << 19)
+        | (mode.packed_horizontal_bit() << 21)
 }
 
 fn unpack_layer_profile(raw: u32) -> (TrackballMode, u16, u16, bool, SensorRotation) {
-    let mode = if raw & 1 != 0 { TrackballMode::Scroll } else { TrackballMode::Cursor };
+    let mode = if raw & 1 == 0 {
+        TrackballMode::Cursor
+    } else if (raw >> 21) & 1 != 0 {
+        TrackballMode::HorizontalScroll
+    } else {
+        TrackballMode::Scroll
+    };
     let gain_q8 = ((raw >> 1) & 0x07ff) as u16;
     let scroll_den = (((raw >> 12) & 0x3f) as u16).max(1);
     let inertia = ((raw >> 18) & 1) != 0;
@@ -59,23 +91,24 @@ fn unpack_layer_profile(raw: u32) -> (TrackballMode, u16, u16, bool, SensorRotat
 }
 
 const fn profile_raw(mode: TrackballMode, gain_q8: u16, scroll_den: u16, inertia: bool, rotation: SensorRotation) -> u32 {
-    (mode as u32)
+    mode.packed_scroll_bit()
         | ((gain_q8 as u32) << 1)
         | ((scroll_den as u32) << 12)
         | ((inertia as u32) << 18)
         | ((rotation.raw() as u32) << 19)
+        | (mode.packed_horizontal_bit() << 21)
 }
 
 static LAYER_PROFILES: [AtomicU32; TRACKBALL_LAYER_COUNT * 2] = [
-    // Base: right cursor 3/2 at 0°, left scroll 1/2 + inertia at 180°.
+    // Base: right cursor 3/2 at 0°, left scroll slowed to 1/20 + inertia at 180°.
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 384, 6, false, SensorRotation::Deg0)),
-    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 2, true, SensorRotation::Deg180)),
+    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 20, true, SensorRotation::Deg180)),
     // Num: right precision cursor 1/2 at 0°, left cursor 3/2 at 0°.
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 128, 6, false, SensorRotation::Deg0)),
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 384, 6, false, SensorRotation::Deg0)),
-    // Sym: both scroll; keep right untouched at 0°, left scroll at 180°.
-    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 2, true, SensorRotation::Deg0)),
-    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 6, true, SensorRotation::Deg180)),
+    // Sym: both scroll at roughly one tenth of the previous speed.
+    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 20, true, SensorRotation::Deg0)),
+    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 60, true, SensorRotation::Deg180)),
     // Sys + four reserved layers default to ordinary cursor mode.
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false, SensorRotation::Deg0)),
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, false, SensorRotation::Deg0)),
@@ -243,7 +276,7 @@ pub fn apply_persisted_blob(data: &[u8; TRACKBALL_PERSISTED_LEN]) {
     for layer in 0..TRACKBALL_LAYER_COUNT as u8 {
         for device_id in [RIGHT_TRACKBALL_ID, LEFT_TRACKBALL_ID] {
             let p = &data[offset..offset + TRACKBALL_LAYER_PROFILE_WIRE_LEN];
-            let mode = if p[0] == 1 { TrackballMode::Scroll } else { TrackballMode::Cursor };
+            let mode = TrackballMode::from_wire(p[0]);
             let gain = u16::from_le_bytes([p[1], p[2]]).clamp(16, 2048);
             let scroll_den = (p[3] as u16).clamp(1, 64);
             let inertia = p[4] != 0;
@@ -261,9 +294,9 @@ pub fn load_defaults() {
     apply_config(LEFT_TRACKBALL_ID, &left);
 
     let defaults = [
-        (TrackballMode::Cursor, 384, 6, false, SensorRotation::Deg0), (TrackballMode::Scroll, 256, 2, true, SensorRotation::Deg180),
+        (TrackballMode::Cursor, 384, 6, false, SensorRotation::Deg0), (TrackballMode::Scroll, 256, 20, true, SensorRotation::Deg180),
         (TrackballMode::Cursor, 128, 6, false, SensorRotation::Deg0), (TrackballMode::Cursor, 384, 6, false, SensorRotation::Deg0),
-        (TrackballMode::Scroll, 256, 2, true, SensorRotation::Deg0),  (TrackballMode::Scroll, 256, 6, true, SensorRotation::Deg180),
+        (TrackballMode::Scroll, 256, 20, true, SensorRotation::Deg0), (TrackballMode::Scroll, 256, 60, true, SensorRotation::Deg180),
     ];
     for layer in 0..TRACKBALL_LAYER_COUNT as u8 {
         for device_id in [RIGHT_TRACKBALL_ID, LEFT_TRACKBALL_ID] {
@@ -367,7 +400,7 @@ pub fn handle_rynk_trackball(msg: &mut RynkMessage<'_>) -> Option<Result<(), Ryn
             let request = match msg.decode_request::<[u8; 8]>() { Ok(value) => value, Err(error) => return Some(Err(error)) };
             let layer = request[0];
             let device_id = request[1];
-            let mode = if request[2] == 1 { TrackballMode::Scroll } else { TrackballMode::Cursor };
+            let mode = TrackballMode::from_wire(request[2]);
             let gain = u16::from_le_bytes([request[3], request[4]]).clamp(16, 2048);
             let scroll_den = (request[5] as u16).clamp(1, 64);
             let inertia = request[6] != 0;
