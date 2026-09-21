@@ -70,6 +70,13 @@ __ __ __ __ __ __ __ Kp0 __ KpDot KpEqual __
 """
 
 
+[behavior.morse]
+# PG1KB layer-tap keys should resolve to the hold layer as soon as another
+# key is pressed. This removes the perceptible wait before Num/Sym becomes active.
+hold_on_other_press = true
+hold_timeout = "180ms"
+gap_timeout = "180ms"
+
 [ble]
 enabled = true
 
