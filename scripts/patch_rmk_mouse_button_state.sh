@@ -51,5 +51,50 @@ if count < 2:
 k = k.replace(old, new)
 keyboard.write_text(k)
 
-print("Patched RMK mouse button state bridge for custom pointing reports")
+# Normalize mouse button bits at the final HID writer, not only when a custom
+# trackball report is queued. This prevents a stale pre-click motion report
+# already sitting in the queue from briefly sending buttons=0 after MouseBtn1
+# was pressed (or buttons=1 after release), which Windows can interpret as
+# multiple clicks and maximize a title bar instead of dragging it.
+ble = Path(channel.parent / "ble" / "mod.rs")
+if ble.exists():
+    b = ble.read_text()
+    old = """        loop {
+            let report = BLE_REPORT_CHANNEL.receive().await;
+            if let Err(e) = ble_hid_server.write_report(&report).await {
+"""
+    new = """        loop {
+            let mut report = BLE_REPORT_CHANNEL.receive().await;
+            if let crate::hid::Report::MouseReport(ref mut mouse) = report {
+                mouse.buttons = crate::channel::mouse_button_state();
+            }
+            if let Err(e) = ble_hid_server.write_report(&report).await {
+"""
+    if old not in b and "mouse.buttons = crate::channel::mouse_button_state();" not in b:
+        raise SystemExit("ble/mod.rs writer anchor not found")
+    if old in b:
+        b = b.replace(old, new, 1)
+    ble.write_text(b)
+
+usb = Path(channel.parent / "usb" / "mod.rs")
+if usb.exists():
+    u = usb.read_text()
+    old = """        loop {
+            let report = USB_REPORT_CHANNEL.receive().await;
+
+            // EndpointError::Disabled never fires"""
+    new = """        loop {
+            let mut report = USB_REPORT_CHANNEL.receive().await;
+            if let crate::hid::Report::MouseReport(ref mut mouse) = report {
+                mouse.buttons = crate::channel::mouse_button_state();
+            }
+
+            // EndpointError::Disabled never fires"""
+    if old not in u and "mouse.buttons = crate::channel::mouse_button_state();" not in u:
+        raise SystemExit("usb/mod.rs writer anchor not found")
+    if old in u:
+        u = u.replace(old, new, 1)
+    usb.write_text(u)
+
+print("Patched RMK mouse button state bridge and final HID writer normalization")
 PY
