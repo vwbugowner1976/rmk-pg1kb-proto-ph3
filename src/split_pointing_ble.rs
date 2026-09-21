@@ -168,10 +168,11 @@ impl SplitPointingBleProcessor {
                     self.flush_cursor_report();
                 }
             }
-            TrackballMode::Scroll => {
-                if logical_y == 0 { return; }
-                let incoming_direction: i8 = if logical_y > 0 { 1 } else { -1 };
-                let magnitude = logical_y.abs();
+            mode @ (TrackballMode::Scroll | TrackballMode::HorizontalScroll) => {
+                let logical_axis = if matches!(mode, TrackballMode::HorizontalScroll) { logical_x } else { logical_y };
+                if logical_axis == 0 { return; }
+                let incoming_direction: i8 = if logical_axis > 0 { 1 } else { -1 };
+                let magnitude = logical_axis.abs();
                 let noise = cfg.direction_noise_threshold() as i32;
                 let reverse = cfg.direction_reverse_threshold() as i32;
 
@@ -202,7 +203,7 @@ impl SplitPointingBleProcessor {
     async fn poll(&mut self) {
         match self.sync_mode() {
             TrackballMode::Cursor => self.poll_cursor(),
-            TrackballMode::Scroll => self.poll_scroll(),
+            TrackballMode::Scroll | TrackballMode::HorizontalScroll => self.poll_scroll(),
         }
 
         if self.last_diag.elapsed() >= Duration::from_millis(DIAG_INTERVAL_MS) {
@@ -332,10 +333,17 @@ impl SplitPointingBleProcessor {
 
         let wheel_steps = self.wheel_accum_q8 / Q8_ONE;
         if wheel_steps == 0 { return; }
-        let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let report = Report::MouseReport(MouseReport { buttons: rmk::channel::mouse_button_state(), x: 0, y: 0, wheel, pan: 0 });
+        let scroll = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let horizontal = matches!(runtime::effective_mode(self.device_id), TrackballMode::HorizontalScroll);
+        let report = Report::MouseReport(MouseReport {
+            buttons: rmk::channel::mouse_button_state(),
+            x: 0,
+            y: 0,
+            wheel: if horizontal { 0 } else { scroll },
+            pan: if horizontal { scroll } else { 0 },
+        });
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
-            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
+            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((scroll as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
         } else {
             self.hid_busy = self.hid_busy.saturating_add(1);
