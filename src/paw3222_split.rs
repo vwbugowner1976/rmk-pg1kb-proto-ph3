@@ -7,9 +7,9 @@ use rmk::macros::processor;
 
 use crate::paw3222::{MotionDelta, Paw3222, Paw3222Error};
 
-// Match the nRF52 split BLE connection interval (~7.5 ms) instead of publishing
+// Match the nRF52 split BLE connection interval (10 ms) instead of publishing
 // faster than the link can deliver. The central now emits left cursor HID immediately.
-const REPORT_INTERVAL_MS: u64 = 8;
+const REPORT_INTERVAL_MS: u64 = 10;
 const DIAG_INTERVAL_MS: u64 = 1000;
 
 #[processor(subscribe = [PointingSetCpiEvent], poll_interval = 1)]
