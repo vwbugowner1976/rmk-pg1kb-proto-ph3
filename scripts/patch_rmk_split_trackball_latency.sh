@@ -47,8 +47,20 @@ if not m:
     print(f"Could not locate max_latency in default_split_conn_params() in {path}", file=sys.stderr)
     sys.exit(4)
 new_body = body[:m.start()] + m.group(1) + str(target) + body[m.end():]
+new_body = re.sub(
+    r'min_connection_interval\s*:\s*Duration::from_micros\(\d+\)',
+    'min_connection_interval: Duration::from_micros(10000)',
+    new_body,
+    count=1,
+)
+new_body = re.sub(
+    r'max_connection_interval\s*:\s*Duration::from_micros\(\d+\)',
+    'max_connection_interval: Duration::from_micros(10000)',
+    new_body,
+    count=1,
+)
 path.write_text(text[:fn.start(2)] + new_body + text[fn.end(2):])
 print(f"Patched RMK active split max_latency -> {target}")
-print("Connection interval remains unchanged (normally 7.5 ms).")
+print("Patched RMK active split connection interval -> 10 ms.")
 print(f"File: {path}")
 PY
