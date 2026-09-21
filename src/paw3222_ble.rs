@@ -206,7 +206,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
 
         let stable = magnitude.saturating_mul(*direction as i32);
         let scroll_q8 = stable.saturating_mul(Q8_ONE) / scale_den.max(1);
-        *accum_q8 = accum_q8.saturating_add(scroll_q8);
+        *accum_q8 = (*accum_q8).saturating_add(scroll_q8);
         *velocity_q8 = if inertia_enabled { scroll_q8 / INERTIA_DIV } else { 0 };
         true
     }
@@ -222,9 +222,9 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             *direction = 0;
             return;
         }
-        *accum_q8 = accum_q8.saturating_add(*velocity_q8);
-        *velocity_q8 = velocity_q8.saturating_mul(decay_num as i32) / decay_den.max(1) as i32;
-        if velocity_q8.abs() < STOP_VELOCITY_Q8 {
+        *accum_q8 = (*accum_q8).saturating_add(*velocity_q8);
+        *velocity_q8 = (*velocity_q8).saturating_mul(decay_num as i32) / decay_den.max(1) as i32;
+        if (*velocity_q8).abs() < STOP_VELOCITY_Q8 {
             *velocity_q8 = 0;
             *direction = 0;
         }
@@ -232,7 +232,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
 
     fn send_scroll_report(&mut self) {
         let cfg = runtime::config(self.id);
-        let (logical_x, logical_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
+        let (logical_x, logical_y) = runtime::effective_rotation(self.id).apply(self.accumulated_x, self.accumulated_y);
         self.accumulated_x = 0;
         self.accumulated_y = 0;
 
