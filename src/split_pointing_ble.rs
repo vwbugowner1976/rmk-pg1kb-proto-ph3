@@ -246,7 +246,7 @@ impl SplitPointingBleProcessor {
 
         let stable = magnitude.saturating_mul(*direction as i32);
         let scroll_q8 = stable.saturating_mul(Q8_ONE) / scale_den.max(1);
-        *accum_q8 = accum_q8.saturating_add(scroll_q8);
+        *accum_q8 = (*accum_q8).saturating_add(scroll_q8);
         *velocity_q8 = if inertia_enabled { scroll_q8 / INERTIA_DIV } else { 0 };
         true
     }
@@ -262,9 +262,9 @@ impl SplitPointingBleProcessor {
             *direction = 0;
             return;
         }
-        *accum_q8 = accum_q8.saturating_add(*velocity_q8);
-        *velocity_q8 = velocity_q8.saturating_mul(decay_num as i32) / decay_den.max(1) as i32;
-        if velocity_q8.abs() < STOP_VELOCITY_Q8 {
+        *accum_q8 = (*accum_q8).saturating_add(*velocity_q8);
+        *velocity_q8 = (*velocity_q8).saturating_mul(decay_num as i32) / decay_den.max(1) as i32;
+        if (*velocity_q8).abs() < STOP_VELOCITY_Q8 {
             *velocity_q8 = 0;
             *direction = 0;
         }
