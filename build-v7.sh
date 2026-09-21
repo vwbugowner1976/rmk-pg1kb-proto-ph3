@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 # Generate stock RMK keyboard.toml from the reusable JP-key source.
 # The helper repo is pinned for reproducible local builds and cached locally.
-JPKEYS_REV="0ba363ace66168be823739a2094fdc67d7f15acd"
+JPKEYS_REV="546599e3a229badac6bb18efbca3004153ca4709"
 JPKEYS_DIR="$PWD/.cache/rmk-jpkeys-for-us-layout"
 JPKEYS_URL="https://github.com/vwbugowner1976/rmk-jpkeys-for-us-layout.git"
 
@@ -20,7 +20,7 @@ if ! git -C "$JPKEYS_DIR" cat-file -e "$JPKEYS_REV^{commit}" 2>/dev/null; then
 fi
 git -C "$JPKEYS_DIR" checkout --detach --quiet "$JPKEYS_REV"
 
-python3 "$JPKEYS_DIR/tools/apply_jpkeys.py" keyboard.jp.toml keyboard.toml
+python3 "$JPKEYS_DIR/tools/apply_jpkeys.py" keyboard.jp.toml keyboard.toml --runtime-abi
 
 
 # Build against a project-local copy of the official crates.io RMK 0.9.0
