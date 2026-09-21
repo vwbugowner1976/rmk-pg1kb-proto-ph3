@@ -277,7 +277,7 @@ impl SplitPointingBleProcessor {
 
         let x = whole_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let y = whole_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let report = Report::MouseReport(MouseReport { buttons: 0, x, y, wheel: 0, pan: 0 });
+        let report = Report::MouseReport(MouseReport { buttons: rmk::channel::mouse_button_state(), x, y, wheel: 0, pan: 0 });
         self.last_hid_attempt = Some(Instant::now());
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
             let hid_now = Instant::now();
@@ -333,7 +333,7 @@ impl SplitPointingBleProcessor {
         let wheel_steps = self.wheel_accum_q8 / Q8_ONE;
         if wheel_steps == 0 { return; }
         let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let report = Report::MouseReport(MouseReport { buttons: 0, x: 0, y: 0, wheel, pan: 0 });
+        let report = Report::MouseReport(MouseReport { buttons: rmk::channel::mouse_button_state(), x: 0, y: 0, wheel, pan: 0 });
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
             self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
