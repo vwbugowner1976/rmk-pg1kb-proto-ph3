@@ -41,11 +41,11 @@ impl TrackballMode {
     }
 }
 
-const fn profile_mode_wire(mode: TrackballMode, horizontal_scroll_den: u16) -> u8 {
+fn profile_mode_wire(mode: TrackballMode, horizontal_scroll_den: u16) -> u8 {
     (mode as u8) | (((horizontal_scroll_den.clamp(1, 63) as u8) & 0x3f) << 2)
 }
 
-const fn horizontal_scroll_den_from_wire(raw: u8, fallback: u16) -> u16 {
+fn horizontal_scroll_den_from_wire(raw: u8, fallback: u16) -> u16 {
     let den = ((raw >> 2) & 0x3f) as u16;
     if den == 0 { fallback } else { den }
 }
