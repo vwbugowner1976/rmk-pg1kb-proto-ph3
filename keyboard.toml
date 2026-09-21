@@ -83,6 +83,12 @@ forks = [
   { trigger = "F16", negative_output = "WM(Kc7, LShift)", positive_output = "WM(Kc2, LShift)", match_any = "LShift|RShift" },
   # JP_YENPIPE
   { trigger = "F17", negative_output = "International3", positive_output = "WM(International3, LShift)", match_any = "LShift|RShift" },
+  # JP_BAQTTILDE
+  { trigger = "F18", negative_output = "WM(LeftBracket, LShift)", positive_output = "WM(Equal, LShift)", match_any = "LShift|RShift" },
+  # JP_LBRACELBRACKET
+  { trigger = "F19", negative_output = "RightBracket", positive_output = "WM(RightBracket, LShift)", match_any = "LShift|RShift" },
+  # JP_RBRACERBRACKET
+  { trigger = "F20", negative_output = "Backslash", positive_output = "WM(Backslash, LShift)", match_any = "LShift|RShift" },
 # END rmk-jpkeys-for-us-layout (generated)
 ]
 
