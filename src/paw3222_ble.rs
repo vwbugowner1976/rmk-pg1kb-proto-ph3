@@ -29,9 +29,11 @@ pub struct Paw3222BleProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> 
     cursor_out_x_q8: i32,
     cursor_out_y_q8: i32,
     wheel_accum_q8: i32,
-    velocity_q8: i32,
-    input_seen: bool,
-    direction: i8,
+    pan_accum_q8: i32,
+    wheel_velocity_q8: i32,
+    pan_velocity_q8: i32,
+    wheel_direction: i8,
+    pan_direction: i8,
     last_mode: u8,
     last_delta: MotionDelta,
     sensor_reads: u32,
@@ -56,9 +58,11 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             cursor_out_x_q8: 0,
             cursor_out_y_q8: 0,
             wheel_accum_q8: 0,
-            velocity_q8: 0,
-            input_seen: false,
-            direction: 0,
+            pan_accum_q8: 0,
+            wheel_velocity_q8: 0,
+            pan_velocity_q8: 0,
+            wheel_direction: 0,
+            pan_direction: 0,
             last_mode: runtime::effective_mode(id) as u8,
             last_delta: MotionDelta::default(),
             sensor_reads: 0,
@@ -77,9 +81,11 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         self.cursor_out_x_q8 = 0;
         self.cursor_out_y_q8 = 0;
         self.wheel_accum_q8 = 0;
-        self.velocity_q8 = 0;
-        self.input_seen = false;
-        self.direction = 0;
+        self.pan_accum_q8 = 0;
+        self.wheel_velocity_q8 = 0;
+        self.pan_velocity_q8 = 0;
+        self.wheel_direction = 0;
+        self.pan_direction = 0;
     }
 
     fn sync_mode(&mut self) -> TrackballMode {
@@ -120,7 +126,6 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
                     self.last_delta = delta;
                     self.accumulated_x = self.accumulated_x.saturating_add(delta.x as i32);
                     self.accumulated_y = self.accumulated_y.saturating_add(delta.y as i32);
-                    self.input_seen = true;
                 }
                 Ok(None) => {}
                 Err(_) => self.read_errors = self.read_errors.saturating_add(1),
@@ -130,8 +135,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         if self.ready && self.last_report.elapsed() >= Duration::from_millis(REPORT_INTERVAL_MS) {
             match self.sync_mode() {
                 TrackballMode::Cursor => self.send_cursor_report(),
-                TrackballMode::Scroll => self.send_scroll_report(false),
-                TrackballMode::HorizontalScroll => self.send_scroll_report(true),
+                TrackballMode::Scroll => self.send_scroll_report(),
             }
         }
 
@@ -147,7 +151,6 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             self.cursor_out_y_q8 = self.cursor_out_y_q8.saturating_add(rot_y.saturating_mul(gain_q8));
             self.accumulated_x = 0;
             self.accumulated_y = 0;
-            self.input_seen = false;
         }
 
         let whole_x = self.cursor_out_x_q8 / Q8_ONE;
@@ -171,66 +174,142 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         }
     }
 
-    fn send_scroll_report(&mut self, horizontal: bool) {
-        let cfg = runtime::config(self.id);
-        let had_input = self.input_seen && (self.accumulated_x != 0 || self.accumulated_y != 0);
+    fn update_scroll_axis(
+        input: i32,
+        scale_den: i32,
+        inertia_enabled: bool,
+        noise: i32,
+        reverse: i32,
+        accum_q8: &mut i32,
+        velocity_q8: &mut i32,
+        direction: &mut i8,
+    ) -> bool {
+        if input == 0 {
+            return false;
+        }
 
-        if had_input {
-            let (logical_x, logical_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
-            self.accumulated_x = 0;
-            self.accumulated_y = 0;
-            self.input_seen = false;
-
-            let logical_axis = if horizontal { logical_x } else { logical_y };
-            if logical_axis != 0 {
-                let incoming_direction = if logical_axis > 0 { 1 } else { -1 };
-                let magnitude = logical_axis.abs();
-                let noise = cfg.direction_noise_threshold() as i32;
-                let reverse = cfg.direction_reverse_threshold() as i32;
-                if self.direction == 0 {
-                    if magnitude >= noise { self.direction = incoming_direction; }
-                } else if incoming_direction != self.direction {
-                    if magnitude >= reverse {
-                        self.direction = incoming_direction;
-                        self.wheel_accum_q8 = 0;
-                        self.velocity_q8 = 0;
-                    }
-                }
-                if self.direction == incoming_direction {
-                    let stable_y = magnitude.saturating_mul(self.direction as i32);
-                    let scroll_q8 = stable_y.saturating_mul(Q8_ONE) / runtime::effective_scroll_scale_den(self.id) as i32;
-                    self.wheel_accum_q8 = self.wheel_accum_q8.saturating_add(scroll_q8);
-                    self.velocity_q8 = if runtime::effective_inertia_enabled(self.id) { scroll_q8 / INERTIA_DIV } else { 0 };
-                }
+        let incoming_direction = if input > 0 { 1 } else { -1 };
+        let magnitude = input.abs();
+        if *direction == 0 {
+            if magnitude < noise {
+                return false;
             }
-        } else if runtime::effective_inertia_enabled(self.id) && self.velocity_q8 != 0 {
-            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_add(self.velocity_q8);
+            *direction = incoming_direction;
+        } else if incoming_direction != *direction {
+            if magnitude < reverse {
+                return false;
+            }
+            *direction = incoming_direction;
+            *accum_q8 = 0;
+            *velocity_q8 = 0;
+        }
+
+        let stable = magnitude.saturating_mul(*direction as i32);
+        let scroll_q8 = stable.saturating_mul(Q8_ONE) / scale_den.max(1);
+        *accum_q8 = accum_q8.saturating_add(scroll_q8);
+        *velocity_q8 = if inertia_enabled { scroll_q8 / INERTIA_DIV } else { 0 };
+        true
+    }
+
+    fn advance_scroll_inertia(
+        accum_q8: &mut i32,
+        velocity_q8: &mut i32,
+        direction: &mut i8,
+        decay_num: u8,
+        decay_den: u8,
+    ) {
+        if *velocity_q8 == 0 {
+            *direction = 0;
+            return;
+        }
+        *accum_q8 = accum_q8.saturating_add(*velocity_q8);
+        *velocity_q8 = velocity_q8.saturating_mul(decay_num as i32) / decay_den.max(1) as i32;
+        if velocity_q8.abs() < STOP_VELOCITY_Q8 {
+            *velocity_q8 = 0;
+            *direction = 0;
+        }
+    }
+
+    fn send_scroll_report(&mut self) {
+        let cfg = runtime::config(self.id);
+        let (logical_x, logical_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
+        self.accumulated_x = 0;
+        self.accumulated_y = 0;
+
+        let inertia_enabled = runtime::effective_inertia_enabled(self.id);
+        let noise = cfg.direction_noise_threshold() as i32;
+        let reverse = cfg.direction_reverse_threshold() as i32;
+        let wheel_input = Self::update_scroll_axis(
+            logical_y,
+            runtime::effective_scroll_scale_den(self.id) as i32,
+            inertia_enabled,
+            noise,
+            reverse,
+            &mut self.wheel_accum_q8,
+            &mut self.wheel_velocity_q8,
+            &mut self.wheel_direction,
+        );
+        let pan_input = Self::update_scroll_axis(
+            logical_x,
+            runtime::effective_horizontal_scroll_scale_den(self.id) as i32,
+            inertia_enabled,
+            noise,
+            reverse,
+            &mut self.pan_accum_q8,
+            &mut self.pan_velocity_q8,
+            &mut self.pan_direction,
+        );
+
+        if inertia_enabled {
             let (decay_num, decay_den) = cfg.inertia_decay();
-            self.velocity_q8 = self.velocity_q8.saturating_mul(decay_num as i32) / decay_den as i32;
-            if self.velocity_q8.abs() < STOP_VELOCITY_Q8 {
-                self.velocity_q8 = 0;
-                self.direction = 0;
+            if !wheel_input {
+                Self::advance_scroll_inertia(
+                    &mut self.wheel_accum_q8,
+                    &mut self.wheel_velocity_q8,
+                    &mut self.wheel_direction,
+                    decay_num,
+                    decay_den,
+                );
+            }
+            if !pan_input {
+                Self::advance_scroll_inertia(
+                    &mut self.pan_accum_q8,
+                    &mut self.pan_velocity_q8,
+                    &mut self.pan_direction,
+                    decay_num,
+                    decay_den,
+                );
             }
         } else {
-            self.velocity_q8 = 0;
-            self.direction = 0;
+            if !wheel_input {
+                self.wheel_velocity_q8 = 0;
+                self.wheel_direction = 0;
+            }
+            if !pan_input {
+                self.pan_velocity_q8 = 0;
+                self.pan_direction = 0;
+            }
         }
 
         let wheel_steps = self.wheel_accum_q8 / Q8_ONE;
-        if wheel_steps == 0 {
+        let pan_steps = self.pan_accum_q8 / Q8_ONE;
+        if wheel_steps == 0 && pan_steps == 0 {
             self.last_report = Instant::now();
             return;
         }
-        let scroll = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+
+        let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let pan = pan_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let report = Report::MouseReport(MouseReport {
             buttons: rmk::channel::mouse_button_state(),
             x: 0,
             y: 0,
-            wheel: if horizontal { 0 } else { scroll },
-            pan: if horizontal { scroll } else { 0 },
+            wheel,
+            pan,
         });
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
-            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((scroll as i32).saturating_mul(Q8_ONE));
+            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
+            self.pan_accum_q8 = self.pan_accum_q8.saturating_sub((pan as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
             self.last_report = Instant::now();
         } else {
