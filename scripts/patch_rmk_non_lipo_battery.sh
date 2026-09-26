@@ -2,18 +2,24 @@
 set -euo pipefail
 
 RMK_ROOT="${PG1KB_RMK_ROOT:-}"
+RMK_MACRO_ROOT="${PG1KB_RMK_MACRO_ROOT:-}"
 if [ -z "$RMK_ROOT" ] || [ ! -f "$RMK_ROOT/Cargo.toml" ]; then
   echo "PG1KB_RMK_ROOT must point at the project-local RMK 0.9.0 copy." >&2
   exit 1
 fi
+if [ -z "$RMK_MACRO_ROOT" ] || [ ! -f "$RMK_MACRO_ROOT/Cargo.toml" ]; then
+  echo "PG1KB_RMK_MACRO_ROOT must point at the project-local rmk-macro 0.8.0 copy." >&2
+  exit 1
+fi
 
-python3 - "$RMK_ROOT" <<'PY'
+python3 - "$RMK_ROOT" "$RMK_MACRO_ROOT" <<'PY'
 from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
+macro_root = Path(sys.argv[2])
 battery = root / "src/input_device/battery.rs"
-adc = root / "rmk-macro/src/codegen/input_device/adc.rs"
+adc = macro_root / "src/codegen/input_device/adc.rs"
 
 for p in (battery, adc):
     if not p.exists():
