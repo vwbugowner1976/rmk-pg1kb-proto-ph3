@@ -116,7 +116,7 @@ if marker not in b:
     # not call sys_poweroff here because RMK 0.9's generated USB transport
     # does not expose the ZMK zmk_usb_is_powered() predicate to processors.
     b = b.replace(
-        "        let val = event.0;\n        trace!("Detected battery ADC value: {:?}", val);",
+        "        let val = event.0;\n        trace!(\"Detected battery ADC value: {:?}\", val);",
         "        let val = event.0;\n        let battery_mv = self.battery_mv(val);\n        if battery_mv <= self.low_mv {\n            warn!("PG1KB non-LiPo battery low: {} mV", battery_mv);\n        }\n        trace!("Detected battery ADC value: {:?} (~{} mV)", val, battery_mv);",
         1,
     )
