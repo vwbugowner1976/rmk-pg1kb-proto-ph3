@@ -109,8 +109,8 @@ static LAYER_PROFILES: [AtomicU32; TRACKBALL_LAYER_COUNT * 2] = [
     // Num: right precision cursor 1/2 at 0°, left cursor 3/2 at 0°.
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 128, 6, 6, false, SensorRotation::Deg0)),
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 384, 6, 6, false, SensorRotation::Deg0)),
-    // Sym: both scroll at roughly one tenth of the previous speed.
-    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 20, 20, true, SensorRotation::Deg0)),
+    // Sym: both scroll at roughly one tenth of the previous speed, rotated 180°.
+    AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 20, 20, true, SensorRotation::Deg180)),
     AtomicU32::new(profile_raw(TrackballMode::Scroll, 256, 60, 60, true, SensorRotation::Deg180)),
     // Sys + four reserved layers default to ordinary cursor mode.
     AtomicU32::new(profile_raw(TrackballMode::Cursor, 256, 6, 6, false, SensorRotation::Deg0)),
@@ -296,7 +296,7 @@ pub fn load_defaults() {
     let defaults = [
         (TrackballMode::Cursor, 384, 6, 6, false, SensorRotation::Deg0), (TrackballMode::Scroll, 256, 20, 20, true, SensorRotation::Deg180),
         (TrackballMode::Cursor, 128, 6, 6, false, SensorRotation::Deg0), (TrackballMode::Cursor, 384, 6, 6, false, SensorRotation::Deg0),
-        (TrackballMode::Scroll, 256, 20, 20, true, SensorRotation::Deg0), (TrackballMode::Scroll, 256, 60, 60, true, SensorRotation::Deg180),
+        (TrackballMode::Scroll, 256, 20, 20, true, SensorRotation::Deg180), (TrackballMode::Scroll, 256, 60, 60, true, SensorRotation::Deg180),
     ];
     for layer in 0..TRACKBALL_LAYER_COUNT as u8 {
         for device_id in [RIGHT_TRACKBALL_ID, LEFT_TRACKBALL_ID] {
