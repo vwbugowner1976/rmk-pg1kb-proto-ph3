@@ -13,14 +13,27 @@ if [ -z "$REGISTRY_RMK" ] || [ ! -f "$REGISTRY_RMK/Cargo.toml" ]; then
     exit 1
 fi
 
-LOCAL_RMK="$PWD/.rmk-patched/rmk-0.9.0"
-rm -rf "$LOCAL_RMK"
-mkdir -p "$(dirname "$LOCAL_RMK")"
+LOCAL_PATCH_ROOT="$PWD/.rmk-patched"
+LOCAL_RMK="$LOCAL_PATCH_ROOT/rmk-0.9.0"
+REGISTRY_RMK_MACRO="$(find "$HOME/.cargo/registry/src" -maxdepth 2 -type d -name 'rmk-macro-0.8.0' 2>/dev/null | sort | tail -n 1)"
+if [ -z "$REGISTRY_RMK_MACRO" ] || [ ! -f "$REGISTRY_RMK_MACRO/Cargo.toml" ]; then
+    echo "Official RMK macro 0.8.0 source not found in Cargo registry." >&2
+    echo "RMK 0.9.0 requires rmk-macro 0.8.0; run one normal RMK 0.9 build/fetch first, then retry." >&2
+    exit 1
+fi
+
+rm -rf "$LOCAL_PATCH_ROOT"
+mkdir -p "$LOCAL_PATCH_ROOT"
 cp -a "$REGISTRY_RMK" "$LOCAL_RMK"
+LOCAL_RMK_MACRO="$LOCAL_PATCH_ROOT/rmk-macro-0.8.0"
+cp -a "$REGISTRY_RMK_MACRO" "$LOCAL_RMK_MACRO"
 export PG1KB_RMK_ROOT="$LOCAL_RMK"
+export PG1KB_RMK_MACRO_ROOT="$LOCAL_RMK_MACRO"
 
 echo "Using project-local official RMK copy:"
 echo "  $LOCAL_RMK"
+echo "Using project-local official RMK macro copy:"
+echo "  $LOCAL_RMK_MACRO"
 
 bash scripts/patch_rmk_fast_host_adv.sh 50
 bash scripts/patch_rmk_split_trackball_latency.sh 0
