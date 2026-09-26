@@ -20,8 +20,9 @@ pub const RYNK_SET_LAYER_PROFILE: u16 = 0x0908;
 pub const TRACKBALL_LAYER_COUNT: usize = 8;
 const TRACKBALL_CONFIG_WIRE_LEN: usize = 16;
 const TRACKBALL_LAYER_PROFILE_WIRE_LEN: usize = 6;
-pub const TRACKBALL_PERSISTED_LEN: usize =
-    TRACKBALL_CONFIG_WIRE_LEN * 2 + TRACKBALL_LAYER_COUNT * 2 * TRACKBALL_LAYER_PROFILE_WIRE_LEN;
+// RMK 0.9.0's PG1KB flash API is fixed at 32 bytes. Layer profiles remain
+// runtime-editable through Rynk (0x0907/0x0908) and use firmware defaults after reboot.
+pub const TRACKBALL_PERSISTED_LEN: usize = TRACKBALL_CONFIG_WIRE_LEN * 2;
 
 pub const SAVE_IDLE: u8 = 0;
 pub const SAVE_PENDING: u8 = 1;
@@ -267,22 +268,8 @@ pub fn encode_persisted_blob() -> [u8; TRACKBALL_PERSISTED_LEN] {
     out[..TRACKBALL_CONFIG_WIRE_LEN].copy_from_slice(&right);
     out[TRACKBALL_CONFIG_WIRE_LEN..TRACKBALL_CONFIG_WIRE_LEN * 2].copy_from_slice(&left);
 
-    let mut offset = TRACKBALL_CONFIG_WIRE_LEN * 2;
-    for layer in 0..TRACKBALL_LAYER_COUNT as u8 {
-        for device_id in [RIGHT_TRACKBALL_ID, LEFT_TRACKBALL_ID] {
-            let (mode, gain, scroll_den, horizontal_scroll_den, inertia, rotation) = layer_profile(layer, device_id);
-            let profile = [
-                profile_mode_wire(mode, horizontal_scroll_den),
-                (gain & 0xff) as u8,
-                (gain >> 8) as u8,
-                scroll_den.min(255) as u8,
-                inertia as u8,
-                rotation.raw(),
-            ];
-            out[offset..offset + TRACKBALL_LAYER_PROFILE_WIRE_LEN].copy_from_slice(&profile);
-            offset += TRACKBALL_LAYER_PROFILE_WIRE_LEN;
-        }
-    }
+    // Layer profiles are intentionally not included: the RMK 0.9.0 flash API
+    // accepts exactly 32 bytes. Rynk GET/SET still operates on all 8x2 profiles.
     out
 }
 
@@ -294,29 +281,8 @@ pub fn apply_persisted_blob(data: &[u8; TRACKBALL_PERSISTED_LEN]) {
     apply_config(RIGHT_TRACKBALL_ID, &right);
     apply_config(LEFT_TRACKBALL_ID, &left);
 
-    let mut offset = TRACKBALL_CONFIG_WIRE_LEN * 2;
-    for layer in 0..TRACKBALL_LAYER_COUNT as u8 {
-        for device_id in [RIGHT_TRACKBALL_ID, LEFT_TRACKBALL_ID] {
-            let p = &data[offset..offset + TRACKBALL_LAYER_PROFILE_WIRE_LEN];
-            let gain = u16::from_le_bytes([p[1], p[2]]).clamp(16, 2048);
-            let scroll_den = (p[3] as u16).clamp(1, 63);
-            let mode = TrackballMode::from_wire(p[0]);
-            let horizontal_scroll_den = horizontal_scroll_den_from_wire(p[0], scroll_den);
-            let inertia = p[4] != 0;
-            let rotation = SensorRotation::from_raw(p[5]);
-            let _ = set_layer_profile(
-                layer,
-                device_id,
-                mode,
-                gain,
-                scroll_den,
-                horizontal_scroll_den,
-                inertia,
-                rotation,
-            );
-            offset += TRACKBALL_LAYER_PROFILE_WIRE_LEN;
-        }
-    }
+    // Layer profiles are runtime state; firmware defaults are retained after
+    // restoring the two 16-byte device configurations from flash.
 }
 
 pub fn load_defaults() {
