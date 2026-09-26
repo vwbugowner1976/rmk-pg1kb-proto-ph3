@@ -195,8 +195,10 @@ pub fn effective_inertia_enabled(device_id: u8) -> bool {
     layer_profile(active_layer(), device_id).4
 }
 
+/// Sensor rotation is a physical mounting property, not a per-layer behavior.
+/// Cursor/Scroll mode changes must never rotate the same physical sensor differently.
 pub fn effective_rotation(device_id: u8) -> SensorRotation {
-    layer_profile(active_layer(), device_id).5
+    config(device_id).rotation()
 }
 
 pub fn set_pointing_cpi(device_id: u8, cpi: u16) {
@@ -344,7 +346,10 @@ pub fn state_wire() -> [u8; 9] {
     ]
 }
 
-/// PG1KB private Rynk extension, 0x0901..0x0906.
+/// PG1KB private Rynk extension, 0x0901..0x0908.
+///
+/// Rotation is deliberately device-level. Layer profiles contain mode/speed/
+    /// inertia, but never change the physical sensor orientation.
 pub fn handle_rynk_trackball(msg: &mut RynkMessage<'_>) -> Option<Result<(), RynkError>> {
     match msg.header().cmd.raw() {
         RYNK_GET_TRACKBALL_CONFIG => {
@@ -385,7 +390,8 @@ pub fn handle_rynk_trackball(msg: &mut RynkMessage<'_>) -> Option<Result<(), Ryn
             if layer as usize >= TRACKBALL_LAYER_COUNT || device_id > LEFT_TRACKBALL_ID {
                 return Some(Err(RynkError::Malformed));
             }
-            let (mode, gain, scroll_den, horizontal_scroll_den, inertia, rotation) = layer_profile(layer, device_id);
+            let (mode, gain, scroll_den, horizontal_scroll_den, inertia, _layer_rotation) = layer_profile(layer, device_id);
+            let rotation = config(device_id).rotation();
             let response = [
                 profile_mode_wire(mode, horizontal_scroll_den),
                 (gain & 0xff) as u8,
@@ -405,7 +411,9 @@ pub fn handle_rynk_trackball(msg: &mut RynkMessage<'_>) -> Option<Result<(), Ryn
             let scroll_den = (request[5] as u16).clamp(1, 63);
             let horizontal_scroll_den = horizontal_scroll_den_from_wire(request[2], scroll_den);
             let inertia = request[6] != 0;
-            let rotation = SensorRotation::from_raw(request[7]);
+            // request[7] is the legacy per-layer rotation byte. Ignore it: rotation
+            // belongs to the physical sensor and is configured via the device config.
+            let rotation = config(device_id).rotation();
             if !set_layer_profile(
                 layer,
                 device_id,
