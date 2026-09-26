@@ -51,6 +51,9 @@ rows = 5
 cols = 6
 row_offset = 0
 col_offset = 6
+battery_adc_pin = "P0_05"
+adc_divider_measured = 1
+adc_divider_total = 1
 
 [split.central.matrix]
 row_pins = ["P0_10", "P0_09", "P1_01", "P0_19", "P0_15"]
@@ -61,6 +64,9 @@ rows = 5
 cols = 6
 row_offset = 0
 col_offset = 0
+battery_adc_pin = "P0_05"
+adc_divider_measured = 1
+adc_divider_total = 1
 
 [split.peripheral.matrix]
 row_pins = ["P0_15", "P0_19", "P1_01", "P0_09", "P0_10"]
