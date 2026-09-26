@@ -18,18 +18,86 @@ map = """
 (4,0) (4,1) (4,2) (4,3) (4,4) (4,5) (4,6) (4,7) (4,8) (4,9) (4,10) (4,11)
 """
 
+# The logical keymap follows the original ZMK PG1KB physical transform, but is
+# stored in RMK's 5x12 matrix order. The eight non-physical cells in row 0 stay No.
+# Base bottom-center keeps the original layer-tap behavior:
+#   LT(1, Language2) -> hold Num / tap Language2
+#   LT(2, Language1) -> hold Sym / tap Language1
 [keymap]
-layers = 1
+# Reserve eight runtime-editable layers. MyKeebStudio reveals layers 5-8 on demand.
+layers = 8
 
+# Defaults reconstructed from the PG1KB ZMK Studio screenshots using the
+# shield's exact 52-key matrix transform. RMK stores actions in 5x12 matrix order.
 [[keymap.layer]]
 name = "Base"
 keys = """
-No No No No No No Y U I O P Enter
-No No No No No No H J K L A B
-No No No No No No N M C D E F
-No No No No No No Kc1 Kc2 Kc3 Kc4 Kc5 Kc6
-No No No No No No F1 F2 F3 F4 F5 F6
+MouseBtn2 MouseBtn1 No No No No MouseBtn3 MouseBtn1 No No No No
+T R E W Q Tab Y U I O Minus F13
+G F D S A LCtrl H J K L P F14
+B V C X Z LShift N M Comma Dot F15 F16
+LT(1, Space) LT(2, Space) LGui LAlt LGui Grave LT(2, Language1) Enter RCtrl RShift Slash F17
 """
+
+[[keymap.layer]]
+name = "Num"
+keys = """
+__ __ No No No No WM(C, LCtrl) WM(V, LCtrl) No No No No
+Kc5 Kc4 Kc3 Kc2 Kc0 __ Kc6 Kc7 Kc8 Kc9 __ Backspace
+__ __ __ __ Kc1 __ Left Down Up Right Kc0 Delete
+F5 F4 F3 F2 __ __ F6 F7 F8 F9 __ __
+__ __ __ __ F1 __ __ __ __ __ F10 F11
+"""
+
+[[keymap.layer]]
+name = "Sym"
+keys = """
+__ __ No No No No __ __ No No No No
+WM(Kc5, LShift) WM(Kc4, LShift) WM(Kc3, LShift) LeftBracket WM(Kc1, LShift) WM(LeftBracket, LShift) Equal WM(Kc6, LShift) WM(Quote, LShift) Home End F12
+WM(RightBracket, LShift) RightBracket __ __ WM(Slash, LShift) WM(Equal, LShift) WM(Backslash, LShift) Backslash __ __ PrintScreen __
+WM(Comma, LShift) WM(Kc8, LShift) __ __ __ __ WM(Dot, LShift) WM(Kc9, LShift) __ __ Quote WM(Kc2, LShift)
+__ __ __ __ __ __ __ __ __ __ WM(Slash, LShift) WM(International3, LShift)
+"""
+
+[[keymap.layer]]
+name = "Sys"
+keys = """
+User10 User7 No No No No __ __ No No No No
+User4 User3 User2 User1 Reboot No __ Kp7 Kp8 Kp9 __ __
+__ __ __ __ User0 __ __ Kp4 Kp5 Kp6 KpAsterisk KpSlash
+__ __ __ __ __ __ __ Kp1 Kp2 Kp3 KpPlus KpMinus
+__ __ __ __ __ __ __ Kp0 __ KpDot KpEqual __
+"""
+
+
+[behavior.fork]
+forks = [
+# BEGIN rmk-jpkeys-for-us-layout (generated)
+  # JP_MINUSUNDER
+  { trigger = "F13", negative_output = "Minus", positive_output = "WM(International1, LShift)", match_any = "LShift|RShift" },
+  # JP_EQUALPLUS
+  { trigger = "F14", negative_output = "WM(Minus, LShift)", positive_output = "WM(Semicolon, LShift)", match_any = "LShift|RShift" },
+  # JP_SEMICOLONCOLON
+  { trigger = "F15", negative_output = "Semicolon", positive_output = "Quote", match_any = "LShift|RShift" },
+  # JP_QUOTEDQUOTE
+  { trigger = "F16", negative_output = "WM(Kc7, LShift)", positive_output = "WM(Kc2, LShift)", match_any = "LShift|RShift" },
+  # JP_YENPIPE
+  { trigger = "F17", negative_output = "International3", positive_output = "WM(International3, LShift)", match_any = "LShift|RShift" },
+  # JP_BAQTTILDE
+  { trigger = "F18", negative_output = "WM(LeftBracket, LShift)", positive_output = "WM(Equal, LShift)", match_any = "LShift|RShift" },
+  # JP_LBRACELBRACKET
+  { trigger = "F19", negative_output = "RightBracket", positive_output = "WM(RightBracket, LShift)", match_any = "LShift|RShift" },
+  # JP_RBRACERBRACKET
+  { trigger = "F20", negative_output = "Backslash", positive_output = "WM(Backslash, LShift)", match_any = "LShift|RShift" },
+# END rmk-jpkeys-for-us-layout (generated)
+]
+
+[behavior.morse]
+# PG1KB layer-tap keys should resolve to the hold layer as soon as another
+# key is pressed. This removes the perceptible wait before Num/Sym becomes active.
+hold_on_other_press = true
+hold_timeout = "180ms"
+gap_timeout = "180ms"
 
 [ble]
 enabled = true
@@ -70,7 +138,11 @@ adc_divider_total = 1
 
 [split.peripheral.matrix]
 row_pins = ["P0_15", "P0_19", "P1_01", "P0_09", "P0_10"]
+# Left PCB is mirrored. Keep the electrical column order so the reported
+# matrix coordinates match the original ZMK transform (physical left-to-right
+# is logical col 5..0 on the left half).
 col_pins = ["P1_11", "P0_04", "P0_29", "P0_28", "P0_03", "P0_02"]
 
 [rmk]
 split_peripherals_num = 1
+ble_profiles_num = 5
