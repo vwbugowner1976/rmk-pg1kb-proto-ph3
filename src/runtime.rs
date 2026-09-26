@@ -195,10 +195,10 @@ pub fn effective_inertia_enabled(device_id: u8) -> bool {
     layer_profile(active_layer(), device_id).4
 }
 
-/// Sensor rotation is a physical mounting property, not a per-layer behavior.
-/// Cursor/Scroll mode changes must never rotate the same physical sensor differently.
+/// Sensor rotation follows the active layer profile so Cursor and Scroll
+/// can intentionally use different physical orientations.
 pub fn effective_rotation(device_id: u8) -> SensorRotation {
-    config(device_id).rotation()
+    layer_profile(active_layer(), device_id).5
 }
 
 pub fn set_pointing_cpi(device_id: u8, cpi: u16) {
@@ -390,8 +390,7 @@ pub fn handle_rynk_trackball(msg: &mut RynkMessage<'_>) -> Option<Result<(), Ryn
             if layer as usize >= TRACKBALL_LAYER_COUNT || device_id > LEFT_TRACKBALL_ID {
                 return Some(Err(RynkError::Malformed));
             }
-            let (mode, gain, scroll_den, horizontal_scroll_den, inertia, _layer_rotation) = layer_profile(layer, device_id);
-            let rotation = config(device_id).rotation();
+            let (mode, gain, scroll_den, horizontal_scroll_den, inertia, rotation) = layer_profile(layer, device_id);
             let response = [
                 profile_mode_wire(mode, horizontal_scroll_den),
                 (gain & 0xff) as u8,
@@ -411,9 +410,7 @@ pub fn handle_rynk_trackball(msg: &mut RynkMessage<'_>) -> Option<Result<(), Ryn
             let scroll_den = (request[5] as u16).clamp(1, 63);
             let horizontal_scroll_den = horizontal_scroll_den_from_wire(request[2], scroll_den);
             let inertia = request[6] != 0;
-            // request[7] is the legacy per-layer rotation byte. Ignore it: rotation
-            // belongs to the physical sensor and is configured via the device config.
-            let rotation = config(device_id).rotation();
+            let rotation = SensorRotation::from_raw(request[7]);
             if !set_layer_profile(
                 layer,
                 device_id,
