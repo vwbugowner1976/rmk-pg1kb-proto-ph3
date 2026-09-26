@@ -33,6 +33,11 @@ No No No No No No F1 F2 F3 F4 F5 F6
 
 [ble]
 enabled = true
+# PG1KB uses the ZMK non-LiPo battery module semantics.
+# Each half measures its local AAA battery on P0.05/AIN3.
+battery_adc_pin = "P0_05"
+adc_divider_measured = 1
+adc_divider_total = 1
 
 [host]
 vial_enabled = false
