@@ -17,8 +17,10 @@ host = root / "src/host/mod.rs"
 split_mod = root / "src/split/mod.rs"
 split_driver = root / "src/split/driver.rs"
 split_peripheral = root / "src/split/peripheral.rs"
+channel = root / "src/channel.rs"
+keyboard = root / "src/keyboard.rs"
 
-for p in [storage, host, split_mod, split_driver, split_peripheral]:
+for p in [storage, host, split_mod, split_driver, split_peripheral, channel, keyboard]:
     if not p.exists():
         raise SystemExit(f"missing RMK source: {p}")
 
@@ -132,5 +134,47 @@ if "PG1KB_SPLIT_CPI_PERIPHERAL_V2" not in sp:
 else:
     print("Split CPI peripheral handling already present")
 
+
+# ---------------------------------------------------------------------------
+# 3) Preserve currently-held mouse buttons in PG1KB custom pointing reports.
+#    The custom PAW3222 processor writes directly to RMK's HID report channel,
+#    so mirror RMK's mouse state into a small atomic bridge.
+#    PG1KB_MOUSE_BUTTON_STATE_V1
+# ---------------------------------------------------------------------------
+if "PG1KB_MOUSE_BUTTON_STATE_V1" not in s:
+    c = channel.read_text()
+    k = keyboard.read_text()
+
+    c_anchor = 'pub static BLE_REPORT_CHANNEL: ReportChannel = Channel::new();\n'
+    if c_anchor not in c:
+        raise SystemExit("channel BLE_REPORT_CHANNEL anchor not found")
+    c = c.replace(c_anchor, c_anchor + '''
+// PG1KB_MOUSE_BUTTON_STATE_V1
+pub static CURRENT_MOUSE_BUTTONS: core::sync::atomic::AtomicU8 =
+    core::sync::atomic::AtomicU8::new(0);
+
+#[inline]
+pub fn current_mouse_buttons() -> u8 {
+    CURRENT_MOUSE_BUTTONS.load(core::sync::atomic::Ordering::Relaxed)
+}
+''', 1)
+
+    k_anchor = '    pub(crate) async fn send_mouse_report(&mut self) {\n        self.send_report(Report::MouseReport(self.mouse.get_report())).await;\n'
+    if k_anchor not in k:
+        raise SystemExit("keyboard send_mouse_report anchor not found")
+    k = k.replace(k_anchor, '''    pub(crate) async fn send_mouse_report(&mut self) {
+        // PG1KB_MOUSE_BUTTON_STATE_V1: publish the same button state used by RMK mouse reports.
+        crate::channel::CURRENT_MOUSE_BUTTONS.store(
+            self.mouse.report.buttons,
+            core::sync::atomic::Ordering::Relaxed,
+        );
+        self.send_report(Report::MouseReport(self.mouse.get_report())).await;
+''', 1)
+
+    channel.write_text(c)
+    keyboard.write_text(k)
+    print("Patched RMK mouse-button state bridge for PG1KB")
+else:
+    print("RMK PG1KB mouse-button state bridge already present")
 print("VERIFY OK: PG1KB persistence + split CPI patches installed")
 PY
