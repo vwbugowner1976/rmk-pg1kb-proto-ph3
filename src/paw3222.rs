@@ -449,7 +449,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222Processor<SPI, CS, 
         let rotation = crate::runtime::effective_rotation(self.id);
         let (rot_x, rot_y) = rotation.apply(x as i32, y as i32);
         let report = Report::MouseReport(MouseReport {
-            buttons: crate::runtime::current_mouse_buttons(),
+            buttons: rmk::channel::current_mouse_buttons(),
             x: rot_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8,
             y: rot_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8,
             wheel: 0,
