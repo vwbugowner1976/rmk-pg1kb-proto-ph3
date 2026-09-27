@@ -81,6 +81,83 @@ else:
     print("RMK PG1KB storage helpers already exported")
 
 # ---------------------------------------------------------------------------
+# 1b) Persistent 288-byte battery history for the PG1KB battery monitor.
+# ---------------------------------------------------------------------------
+battery_marker = "PG1KB_BATTERY_HISTORY_STORAGE_V1"
+if battery_marker not in s:
+    sig_anchor = 'static ACTIVE_BLE_PROFILE_RESPONSE: Signal<crate::RawMutex, Option<u8>> = Signal::new();\n'
+    if sig_anchor not in s:
+        raise SystemExit("battery history signal anchor not found")
+    s = s.replace(sig_anchor, sig_anchor + '''\n// PG1KB_BATTERY_HISTORY_STORAGE_V1\nstatic PG1KB_BATTERY_HISTORY_RESPONSE: Signal<crate::RawMutex, Option<[u8; 288]>> = Signal::new();\nstatic PG1KB_BATTERY_HISTORY_WRITE_RESPONSE: Signal<crate::RawMutex, bool> = Signal::new();\n\npub async fn pg1kb_read_battery_history() -> Option<[u8; 288]> {\n    PG1KB_BATTERY_HISTORY_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::ReadPg1kbBatteryHistory).await;\n    PG1KB_BATTERY_HISTORY_RESPONSE.wait().await\n}\n\npub async fn pg1kb_write_battery_history(data: [u8; 288]) -> bool {\n    PG1KB_BATTERY_HISTORY_WRITE_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::Pg1kbBatteryHistory(data)).await;\n    PG1KB_BATTERY_HISTORY_WRITE_RESPONSE.wait().await\n}\n''', 1)
+
+    enum_anchor = '    ReadPg1kbTrackballConfig,\n}'
+    if enum_anchor not in s:
+        raise SystemExit("battery history enum anchor not found")
+    s = s.replace(enum_anchor, '    ReadPg1kbTrackballConfig,\n    Pg1kbBatteryHistory([u8; 288]),\n    ReadPg1kbBatteryHistory,\n}', 1)
+
+    key_anchor = '    Pg1kbTrackballConfig,\n}'
+    if key_anchor not in s:
+        raise SystemExit("battery history key anchor not found")
+    s = s.replace(key_anchor, '    Pg1kbTrackballConfig,\n    Pg1kbBatteryHistory,\n}', 1)
+
+    data_anchor = '    Pg1kbTrackballConfig([u8; 32]),\n}'
+    if data_anchor not in s:
+        raise SystemExit("battery history data anchor not found")
+    s = s.replace(data_anchor, '    Pg1kbTrackballConfig([u8; 32]),\n    Pg1kbBatteryHistory([u8; 288]),\n}', 1)
+
+    run_anchor = '''                FlashOperationMessage::ReadPg1kbTrackballConfig => {
+                    let resp = match self.fetch_data(StorageKey::Pg1kbTrackballConfig).await {
+                        Some(StorageData::Pg1kbTrackballConfig(v)) => Some(v),
+                        _ => None,
+                    };
+                    PG1KB_TRACKBALL_RESPONSE.signal(resp);
+                    continue;
+                }
+
+'''
+    if run_anchor not in s:
+        raise SystemExit("battery history run anchor not found")
+    s = s.replace(run_anchor, run_anchor + '''                FlashOperationMessage::Pg1kbBatteryHistory(data) => {
+                    let ok = self
+                        .store_data(
+                            StorageKey::Pg1kbBatteryHistory,
+                            &StorageData::Pg1kbBatteryHistory(data),
+                        )
+                        .await
+                        .is_ok();
+                    PG1KB_BATTERY_HISTORY_WRITE_RESPONSE.signal(ok);
+                    continue;
+                }
+                FlashOperationMessage::ReadPg1kbBatteryHistory => {
+                    let resp = match self.fetch_data(StorageKey::Pg1kbBatteryHistory).await {
+                        Some(StorageData::Pg1kbBatteryHistory(v)) => Some(v),
+                        _ => None,
+                    };
+                    PG1KB_BATTERY_HISTORY_RESPONSE.signal(resp);
+                    continue;
+                }
+
+''', 1)
+
+    storage.write_text(s)
+    print("Patched RMK storage for PG1KB battery history")
+else:
+    print("PG1KB battery history storage patch already present")
+
+# Re-export the battery history helpers from rmk::host.
+h = host.read_text()
+if "PG1KB_BATTERY_HISTORY_STORAGE_EXPORT_V1" not in h:
+    anchor = 'pub use crate::storage::{pg1kb_read_trackball_config, pg1kb_write_trackball_config};'
+    if anchor not in h:
+        raise SystemExit("battery history host export anchor not found")
+    h = h.replace(anchor, anchor + '\npub use crate::storage::{pg1kb_read_battery_history, pg1kb_write_battery_history};', 1)
+    h = h.replace("// PG1KB_TRACKBALL_STORAGE_EXPORT_V1", "// PG1KB_TRACKBALL_STORAGE_EXPORT_V1\n// PG1KB_BATTERY_HISTORY_STORAGE_EXPORT_V1", 1)
+    host.write_text(h)
+    print("Re-exported PG1KB battery history storage helpers")
+else:
+    print("PG1KB battery history storage export already present")
+
+# ---------------------------------------------------------------------------
 # 2) Forward PointingSetCpiEvent central -> split peripheral.
 #    SplitMessage derives serde + MaxSize, while PointingSetCpiEvent does not.
 #    Serialize only primitive fields across the split link and reconstruct the
