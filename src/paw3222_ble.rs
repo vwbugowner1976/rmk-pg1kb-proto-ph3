@@ -3,7 +3,7 @@ use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal_async::spi::SpiBus;
 use log::{error, info, warn};
 use rmk::channel::{BLE_REPORT_CHANNEL, current_mouse_buttons};
-use rmk::event::PointingSetCpiEvent;
+use rmk::event::{LayerChangeEvent, PointingSetCpiEvent};
 use rmk::hid::Report;
 use rmk::macros::processor;
 use usbd_hid::descriptor::MouseReport;
@@ -17,7 +17,7 @@ const Q8_ONE: i32 = 256;
 const INERTIA_DIV: i32 = 16;
 const STOP_VELOCITY_Q8: i32 = 4;
 
-#[processor(subscribe = [PointingSetCpiEvent], poll_interval = 1)]
+#[processor(subscribe = [PointingSetCpiEvent, LayerChangeEvent], poll_interval = 1)]
 pub struct Paw3222BleProcessor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> {
     id: u8,
     sensor: Paw3222<SPI, CS, MotionPin>,
@@ -246,11 +246,20 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             self.hid_reports,
             self.hid_busy,
             self.read_errors,
-            runtime::config(self.id).rotation().degrees(),
+            runtime::effective_rotation(self.id).degrees(),
             runtime::effective_mode(self.id) as u8,
             runtime::effective_cursor_gain_q8(self.id),
             runtime::effective_scroll_scale_den(self.id),
         );
+    }
+
+    async fn on_layer_change_event(&mut self, event: LayerChangeEvent) {
+        // Keep the PG1KB runtime profile selector synchronized with RMK's
+        // actual active layer. Without this, effective_rotation()/effective_mode()
+        // would remain on Base even when the keyboard is on Num/Sym.
+        runtime::set_active_layer(event.0);
+        self.reset_motion_state();
+        self.last_mode = runtime::effective_mode(self.id) as u8;
     }
 
     async fn on_pointing_set_cpi_event(&mut self, event: PointingSetCpiEvent) {
