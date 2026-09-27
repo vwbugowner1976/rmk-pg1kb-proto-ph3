@@ -63,7 +63,7 @@ fn load_state(data: [u8; HISTORY_LEN]) {
     });
 }
 
-pub fn get_info() -> [u8; 4] {
+pub fn get_info() -> [u8; 5] {
     critical_section::with(|cs| {
         let state = HISTORY.borrow(cs).borrow();
         [state.count, CAPACITY as u8, state.next, SAMPLE_INTERVAL_MIN as u8, (SAMPLE_INTERVAL_MIN >> 8) as u8]
