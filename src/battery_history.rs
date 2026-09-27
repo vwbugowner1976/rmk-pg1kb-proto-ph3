@@ -6,7 +6,7 @@ use rmk::event::BatteryStatusEvent;
 use rmk::macros::processor;
 use rmk::types::battery::{BatteryStatus, ChargeState};
 
-pub const HISTORY_LEN: usize = 288;
+pub const HISTORY_LEN: usize = 243;
 pub const RECORD_LEN: usize = 6;
 pub const DATA_OFFSET: usize = 3;
 pub const CAPACITY: usize = (HISTORY_LEN - DATA_OFFSET) / RECORD_LEN;
