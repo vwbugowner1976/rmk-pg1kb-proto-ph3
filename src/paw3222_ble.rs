@@ -138,7 +138,8 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         }
 
         let cfg = runtime::config(self.id);
-        let (rot_x, rot_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
+        let rotation = runtime::effective_rotation(self.id);
+        let (rot_x, rot_y) = rotation.apply(self.accumulated_x, self.accumulated_y);
         let gain_q8 = runtime::effective_cursor_gain_q8(self.id) as i32;
         let scaled_x = rot_x.saturating_mul(gain_q8) / Q8_ONE;
         let scaled_y = rot_y.saturating_mul(gain_q8) / Q8_ONE;
@@ -167,7 +168,8 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         let had_input = self.input_seen && (self.accumulated_x != 0 || self.accumulated_y != 0);
 
         if had_input {
-            let (_logical_x, logical_y) = cfg.rotation().apply(self.accumulated_x, self.accumulated_y);
+            let rotation = runtime::effective_rotation(self.id);
+            let (_logical_x, logical_y) = rotation.apply(self.accumulated_x, self.accumulated_y);
             self.accumulated_x = 0;
             self.accumulated_y = 0;
             self.input_seen = false;
