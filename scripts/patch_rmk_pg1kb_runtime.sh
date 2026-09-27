@@ -19,8 +19,9 @@ split_driver = root / "src/split/driver.rs"
 split_peripheral = root / "src/split/peripheral.rs"
 channel = root / "src/channel.rs"
 keyboard = root / "src/keyboard.rs"
+mouse = root / "src/keyboard/mouse.rs"
 
-for p in [storage, host, split_mod, split_driver, split_peripheral, channel, keyboard]:
+for p in [storage, host, split_mod, split_driver, split_peripheral, channel, keyboard, mouse]:
     if not p.exists():
         raise SystemExit(f"missing RMK source: {p}")
 
@@ -144,6 +145,7 @@ else:
 if "PG1KB_MOUSE_BUTTON_STATE_V1" not in s:
     c = channel.read_text()
     k = keyboard.read_text()
+    m = mouse.read_text()
 
     c_anchor = 'pub static BLE_REPORT_CHANNEL: ReportChannel = Channel::new();\n'
     if c_anchor not in c:
@@ -163,7 +165,8 @@ pub fn current_mouse_buttons() -> u8 {
     if k_anchor not in k:
         raise SystemExit("keyboard send_mouse_report anchor not found")
     k = k.replace(k_anchor, '''    pub(crate) async fn send_mouse_report(&mut self) {
-        // PG1KB_MOUSE_BUTTON_STATE_V1: publish the same button state used by RMK mouse reports.
+        // PG1KB_MOUSE_BUTTON_STATE_V1: keep the legacy report-send mirror for
+        // compatibility with the custom PAW3222 report path.
         crate::channel::CURRENT_MOUSE_BUTTONS.store(
             self.mouse.report.buttons,
             core::sync::atomic::Ordering::Relaxed,
@@ -171,8 +174,32 @@ pub fn current_mouse_buttons() -> u8 {
         self.send_report(Report::MouseReport(self.mouse.get_report())).await;
 ''', 1)
 
+    m_anchor = '''                    if pressed {
+                        self.report.buttons |= 1 << index;
+                    } else {
+                        self.report.buttons &= !(1 << index);
+                    }
+                    return MouseAction::SendReport;
+'''
+    if m_anchor not in m:
+        raise SystemExit("mouse button state anchor not found")
+    m = m.replace(m_anchor, '''                    if pressed {
+                        self.report.buttons |= 1 << index;
+                    } else {
+                        self.report.buttons &= !(1 << index);
+                    }
+                    // PG1KB_MOUSE_BUTTON_STATE_V2: publish button state at the
+                    // exact mutation point, before the async HID send can yield.
+                    crate::channel::CURRENT_MOUSE_BUTTONS.store(
+                        self.report.buttons,
+                        core::sync::atomic::Ordering::Relaxed,
+                    );
+                    return MouseAction::SendReport;
+''', 1)
+
     channel.write_text(c)
     keyboard.write_text(k)
+    mouse.write_text(m)
     print("Patched RMK mouse-button state bridge for PG1KB")
 else:
     print("RMK PG1KB mouse-button state bridge already present")
