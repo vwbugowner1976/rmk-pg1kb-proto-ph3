@@ -72,7 +72,8 @@ impl SplitPointingBleProcessor {
         }
 
         let cfg = runtime::config(self.device_id);
-        let (logical_x, logical_y) = cfg.rotation().apply(raw_x, raw_y);
+        let rotation = runtime::effective_rotation(self.device_id);
+        let (logical_x, logical_y) = rotation.apply(raw_x, raw_y);
         match self.sync_mode() {
             TrackballMode::Cursor => {
                 self.cursor_x = self.cursor_x.saturating_add(logical_x);
