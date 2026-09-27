@@ -81,19 +81,19 @@ else:
     print("RMK PG1KB storage helpers already exported")
 
 # ---------------------------------------------------------------------------
-# 1b) Persistent 288-byte battery history for the PG1KB battery monitor.
+# 1b) Persistent 243-byte battery history for the PG1KB battery monitor.
 # ---------------------------------------------------------------------------
 battery_marker = "PG1KB_BATTERY_HISTORY_STORAGE_V1"
 if battery_marker not in s:
     sig_anchor = 'static ACTIVE_BLE_PROFILE_RESPONSE: Signal<crate::RawMutex, Option<u8>> = Signal::new();\n'
     if sig_anchor not in s:
         raise SystemExit("battery history signal anchor not found")
-    s = s.replace(sig_anchor, sig_anchor + '''\n// PG1KB_BATTERY_HISTORY_STORAGE_V1\nstatic PG1KB_BATTERY_HISTORY_RESPONSE: Signal<crate::RawMutex, Option<[u8; 288]>> = Signal::new();\nstatic PG1KB_BATTERY_HISTORY_WRITE_RESPONSE: Signal<crate::RawMutex, bool> = Signal::new();\n\npub async fn pg1kb_read_battery_history() -> Option<[u8; 288]> {\n    PG1KB_BATTERY_HISTORY_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::ReadPg1kbBatteryHistory).await;\n    PG1KB_BATTERY_HISTORY_RESPONSE.wait().await\n}\n\npub async fn pg1kb_write_battery_history(data: [u8; 288]) -> bool {\n    PG1KB_BATTERY_HISTORY_WRITE_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::Pg1kbBatteryHistory(data)).await;\n    PG1KB_BATTERY_HISTORY_WRITE_RESPONSE.wait().await\n}\n''', 1)
+    s = s.replace(sig_anchor, sig_anchor + '''\n// PG1KB_BATTERY_HISTORY_STORAGE_V1\nstatic PG1KB_BATTERY_HISTORY_RESPONSE: Signal<crate::RawMutex, Option<[u8; 243]>> = Signal::new();\nstatic PG1KB_BATTERY_HISTORY_WRITE_RESPONSE: Signal<crate::RawMutex, bool> = Signal::new();\n\npub async fn pg1kb_read_battery_history() -> Option<[u8; 243]> {\n    PG1KB_BATTERY_HISTORY_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::ReadPg1kbBatteryHistory).await;\n    PG1KB_BATTERY_HISTORY_RESPONSE.wait().await\n}\n\npub async fn pg1kb_write_battery_history(data: [u8; 243]) -> bool {\n    PG1KB_BATTERY_HISTORY_WRITE_RESPONSE.reset();\n    FLASH_CHANNEL.send(FlashOperationMessage::Pg1kbBatteryHistory(data)).await;\n    PG1KB_BATTERY_HISTORY_WRITE_RESPONSE.wait().await\n}\n''', 1)
 
     enum_anchor = '    ReadPg1kbTrackballConfig,\n}'
     if enum_anchor not in s:
         raise SystemExit("battery history enum anchor not found")
-    s = s.replace(enum_anchor, '    ReadPg1kbTrackballConfig,\n    Pg1kbBatteryHistory([u8; 288]),\n    ReadPg1kbBatteryHistory,\n}', 1)
+    s = s.replace(enum_anchor, '    ReadPg1kbTrackballConfig,\n    Pg1kbBatteryHistory([u8; 243]),\n    ReadPg1kbBatteryHistory,\n}', 1)
 
     key_anchor = '    Pg1kbTrackballConfig,\n}'
     if key_anchor not in s:
@@ -103,7 +103,7 @@ if battery_marker not in s:
     data_anchor = '    Pg1kbTrackballConfig([u8; 32]),\n}'
     if data_anchor not in s:
         raise SystemExit("battery history data anchor not found")
-    s = s.replace(data_anchor, '    Pg1kbTrackballConfig([u8; 32]),\n    Pg1kbBatteryHistory([u8; 288]),\n}', 1)
+    s = s.replace(data_anchor, '    Pg1kbTrackballConfig([u8; 32]),\n    Pg1kbBatteryHistory([u8; 243]),\n}', 1)
 
     run_anchor = '''                FlashOperationMessage::ReadPg1kbTrackballConfig => {
                     let resp = match self.fetch_data(StorageKey::Pg1kbTrackballConfig).await {
