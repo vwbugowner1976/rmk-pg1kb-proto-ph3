@@ -77,9 +77,10 @@ pub fn get_chunk(chunk: u8) -> [u8; 25] {
     critical_section::with(|cs| {
         let state = HISTORY.borrow(cs).borrow();
         let start = DATA_OFFSET + chunk * CHUNK_RECORDS * RECORD_LEN;
-        out[0] = CHUNK_RECORDS as u8;
-        out[1..1 + CHUNK_RECORDS * RECORD_LEN]
-            .copy_from_slice(&state.data[start..start + CHUNK_RECORDS * RECORD_LEN]);
+        let records = CHUNK_RECORDS.min(CAPACITY.saturating_sub(chunk * CHUNK_RECORDS));
+        out[0] = records as u8;
+        out[1..1 + records * RECORD_LEN]
+            .copy_from_slice(&state.data[start..start + records * RECORD_LEN]);
     });
     out
 }
