@@ -2,7 +2,7 @@ use embassy_time::{Duration, Instant};
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal_async::spi::SpiBus;
 use log::{error, info, warn};
-use rmk::channel::BLE_REPORT_CHANNEL;
+use rmk::channel::{BLE_REPORT_CHANNEL, current_mouse_buttons};
 use rmk::event::PointingSetCpiEvent;
 use rmk::hid::Report;
 use rmk::macros::processor;
@@ -144,7 +144,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
         let scaled_y = rot_y.saturating_mul(gain_q8) / Q8_ONE;
         let x = scaled_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let y = scaled_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let report = Report::MouseReport(MouseReport { buttons: 0, x, y, wheel: 0, pan: 0 });
+        let report = Report::MouseReport(MouseReport { buttons: current_mouse_buttons(), x, y, wheel: 0, pan: 0 });
 
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
             if scaled_x.abs() <= i8::MAX as i32 && scaled_y.abs() <= i8::MAX as i32 {
@@ -212,7 +212,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222BleProcessor<SPI, C
             return;
         }
         let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let report = Report::MouseReport(MouseReport { buttons: 0, x: 0, y: 0, wheel, pan: 0 });
+        let report = Report::MouseReport(MouseReport { buttons: current_mouse_buttons(), x: 0, y: 0, wheel, pan: 0 });
         if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
             self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
