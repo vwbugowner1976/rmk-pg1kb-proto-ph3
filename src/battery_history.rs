@@ -8,7 +8,9 @@ use rmk::types::battery::{BatteryStatus, ChargeState};
 
 pub const HISTORY_LEN: usize = 288;
 pub const RECORD_LEN: usize = 6;
-pub const CAPACITY: usize = HISTORY_LEN / RECORD_LEN;
+pub const DATA_OFFSET: usize = 3;
+pub const CAPACITY: usize = (HISTORY_LEN - DATA_OFFSET) / RECORD_LEN;
+const MAGIC: u8 = 0xB7;
 pub const SAMPLE_INTERVAL_MIN: u16 = 30;
 pub const CHUNK_RECORDS: usize = 4;
 pub const CHUNK_COUNT: usize = CAPACITY / CHUNK_RECORDS;
@@ -42,11 +44,16 @@ fn encode_record(minutes: u32, status: BatteryStatus) -> [u8; RECORD_LEN] {
 fn load_state(data: [u8; HISTORY_LEN]) {
     let mut count = 0u8;
     let mut next = 0u8;
-    for i in 0..CAPACITY {
-        let off = i * RECORD_LEN;
-        if data[off..off + RECORD_LEN].iter().all(|v| *v == 0) { break; }
-        count = count.saturating_add(1);
-        next = ((i + 1) % CAPACITY) as u8;
+    if data[0] == MAGIC {
+        count = data[1].min(CAPACITY as u8);
+        next = data[2].min((CAPACITY.saturating_sub(1)) as u8);
+    } else {
+        for i in 0..CAPACITY {
+            let off = DATA_OFFSET + i * RECORD_LEN;
+            if data[off..off + RECORD_LEN].iter().all(|v| *v == 0) { break; }
+            count = count.saturating_add(1);
+            next = ((i + 1) % CAPACITY) as u8;
+        }
     }
     critical_section::with(|cs| {
         let mut state = HISTORY.borrow(cs).borrow_mut();
@@ -59,7 +66,7 @@ fn load_state(data: [u8; HISTORY_LEN]) {
 pub fn get_info() -> [u8; 4] {
     critical_section::with(|cs| {
         let state = HISTORY.borrow(cs).borrow();
-        [state.count, CAPACITY as u8, SAMPLE_INTERVAL_MIN as u8, (SAMPLE_INTERVAL_MIN >> 8) as u8]
+        [state.count, CAPACITY as u8, state.next, SAMPLE_INTERVAL_MIN as u8, (SAMPLE_INTERVAL_MIN >> 8) as u8]
     })
 }
 
@@ -69,7 +76,7 @@ pub fn get_chunk(chunk: u8) -> [u8; 25] {
     if chunk >= CHUNK_COUNT { return out; }
     critical_section::with(|cs| {
         let state = HISTORY.borrow(cs).borrow();
-        let start = chunk * CHUNK_RECORDS * RECORD_LEN;
+        let start = DATA_OFFSET + chunk * CHUNK_RECORDS * RECORD_LEN;
         out[0] = CHUNK_RECORDS as u8;
         out[1..1 + CHUNK_RECORDS * RECORD_LEN]
             .copy_from_slice(&state.data[start..start + CHUNK_RECORDS * RECORD_LEN]);
@@ -100,9 +107,12 @@ impl BatteryHistoryProcessor {
         if record == [0; RECORD_LEN] { return; }
         critical_section::with(|cs| {
             let mut state = HISTORY.borrow(cs).borrow_mut();
-            let off = state.next as usize * RECORD_LEN;
+            let off = DATA_OFFSET + state.next as usize * RECORD_LEN;
             state.data[off..off + RECORD_LEN].copy_from_slice(&record);
             state.next = ((state.next as usize + 1) % CAPACITY) as u8;
+            state.data[0] = MAGIC;
+            state.data[1] = state.count.saturating_add(1).min(CAPACITY as u8);
+            state.data[2] = state.next;
             state.count = state.count.saturating_add(1).min(CAPACITY as u8);
         });
     }
