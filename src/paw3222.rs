@@ -342,10 +342,8 @@ where
 /// Central-side PAW3222 pointing processor for PG1KB.
 ///
 /// Motion is sent through RMK's active HID transport, so the same sensor path
-/// works over USB and BLE.
-/// CDC ACM interface emits a one-second diagnostic heartbeat. After the raw USB
-/// path is proven on hardware this processor will be replaced by RMK's native
-/// PointingDevice/PointingProcessor path for the USB-vs-BLE comparison.
+/// works over USB and BLE. The diagnostic heartbeat remains available through
+/// the existing USB log interface.
 #[processor(subscribe = [PointingSetCpiEvent], poll_interval = 1)]
 pub struct Paw3222Processor<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> {
     id: u8,
@@ -429,13 +427,13 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222Processor<SPI, CS, 
         }
 
         if self.ready && self.last_report.elapsed() >= Duration::from_millis(REPORT_INTERVAL_MS) {
-            self.send_usb_report();
+            self.send_hid_report();
         }
 
         self.emit_diag_if_due();
     }
 
-    fn send_usb_report(&mut self) {
+    fn send_hid_report(&mut self) {
         if self.accumulated_x == 0 && self.accumulated_y == 0 {
             self.last_report = Instant::now();
             return;
