@@ -71,10 +71,12 @@ __ __ __ __ __ __ __ Kp0 __ KpDot KpEqual __
 
 
 
-# LAlt + LGui enters Sys layer.
-[[combo]]
-key_positions = [50, 51]
-bind = "MO(3)"
+# LAlt + LGui enters Sys layer while both keys are held.
+[behavior.combo]
+timeout = "150ms"
+combos = [
+  { actions = ["LGui", "LAlt"], output = "MO(3)" },
+]
 
 [behavior.fork]
 forks = [
