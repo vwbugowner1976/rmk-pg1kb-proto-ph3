@@ -4,7 +4,7 @@ use embassy_time::{Duration, Instant, Timer};
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal_async::spi::SpiBus;
 use log::{error, info, warn};
-use rmk::channel::USB_REPORT_CHANNEL;
+use rmk::channel::pg1kb_try_send_hid_report;
 use rmk::event::PointingSetCpiEvent;
 use rmk::hid::Report;
 use rmk::macros::processor;
@@ -339,10 +339,10 @@ where
     }
 }
 
-/// Central-side diagnostic processor for PG1KB's right PAW3222.
+/// Central-side PAW3222 pointing processor for PG1KB.
 ///
-/// This remains intentionally USB-only for sensor bring-up. It reports raw
-/// sensor motion directly through RMK's USB HID channel, while RMK's `usb_log`
+/// Motion is sent through RMK's active HID transport, so the same sensor path
+/// works over USB and BLE.
 /// CDC ACM interface emits a one-second diagnostic heartbeat. After the raw USB
 /// path is proven on hardware this processor will be replaced by RMK's native
 /// PointingDevice/PointingProcessor path for the USB-vs-BLE comparison.
@@ -456,7 +456,7 @@ impl<SPI: SpiBus, CS: OutputPin, MotionPin: InputPin> Paw3222Processor<SPI, CS, 
             pan: 0,
         });
 
-        if USB_REPORT_CHANNEL.try_send(report).is_ok() {
+        if pg1kb_try_send_hid_report(report) {
             self.accumulated_x -= x as i32;
             self.accumulated_y -= y as i32;
             self.hid_reports = self.hid_reports.saturating_add(1);
