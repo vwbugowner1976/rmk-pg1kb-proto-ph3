@@ -216,7 +216,7 @@ if "PG1KB_ACTIVE_HID_REPORT_EXPORT_V1" not in c:
     if anchor not in c:
         raise SystemExit("channel try_send_hid_report anchor not found")
     # Add a thin public wrapper next to RMK's internal active-transport sender.
-    wrapper = '''#[inline]\npub fn pg1kb_try_send_hid_report(report: Report) {\n    try_send_hid_report(report);\n}\n\n'''
+    wrapper = '''#[inline]\npub fn pg1kb_try_send_hid_report(report: Report) -> bool {\n    if let Some((_, ch)) = active_report_channel() {\n        ch.try_send(report).is_ok()\n    } else {\n        false\n    }\n}\n\n'''
     c = c.replace(anchor, wrapper + anchor, 1)
     channel.write_text(c)
 
