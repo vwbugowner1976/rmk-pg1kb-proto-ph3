@@ -125,7 +125,7 @@ impl SplitPointingBleProcessor {
         let x = scaled_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let y = scaled_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let report = Report::MouseReport(MouseReport { buttons: 0, x, y, wheel: 0, pan: 0 });
-        pg1kb_try_send_hid_report(report);
+        if pg1kb_try_send_hid_report(report) {
             if scaled_x.abs() <= i8::MAX as i32 && scaled_y.abs() <= i8::MAX as i32 {
                 self.cursor_x = 0;
                 self.cursor_y = 0;
