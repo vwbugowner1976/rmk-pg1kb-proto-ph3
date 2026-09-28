@@ -160,7 +160,7 @@ impl SplitPointingBleProcessor {
         if wheel_steps == 0 { return; }
         let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let report = Report::MouseReport(MouseReport { buttons: 0, x: 0, y: 0, wheel, pan: 0 });
-        if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
+        if pg1kb_try_send_hid_report(report) {
             self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
         } else {
