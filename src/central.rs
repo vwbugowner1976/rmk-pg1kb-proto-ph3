@@ -13,7 +13,7 @@ use rmk::macros::rmk_central;
 #[rmk_central]
 mod keyboard_central {
     #[register_processor(poll)]
-    fn paw3222_input() -> crate::paw3222_ble::NrfPaw3222BleProcessor {
+    fn paw3222_input() -> crate::paw3222::NrfPaw3222Processor {
         use embassy_nrf::gpio::{Flex, Input, Level, Output, OutputDrive, Pull};
         use rmk::driver::bitbang_spi::BitBangSpiBus;
 
@@ -30,7 +30,7 @@ mod keyboard_central {
         let motion = Input::new(p.P1_15, Pull::Up);
         let spi = BitBangSpiBus::new(sck, sdio);
 
-        crate::paw3222_ble::Paw3222BleProcessor::new(
+        crate::paw3222::Paw3222Processor::new(
             crate::runtime::RIGHT_TRACKBALL_ID,
             spi,
             cs,
