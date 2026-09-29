@@ -280,5 +280,29 @@ pub fn current_mouse_buttons() -> u8 {
     print("Patched RMK mouse-button state bridge for PG1KB")
 else:
     print("RMK PG1KB mouse-button state bridge already present")
+# ---------------------------------------------------------------------------
+# 4) Export RMK's active-transport HID report sender to PG1KB split pointing.
+#    PG1KB_ACTIVE_HID_REPORT_EXPORT_V1
+# ---------------------------------------------------------------------------
+c = channel.read_text()
+h = host.read_text()
+if "PG1KB_ACTIVE_HID_REPORT_EXPORT_V1" not in c:
+    anchor = 'pub(crate) fn try_send_hid_report(report: Report) {\n'
+    if anchor not in c:
+        raise SystemExit("channel try_send_hid_report anchor not found")
+    wrapper = '''#[inline]\npub fn pg1kb_try_send_hid_report(report: Report) -> bool {\n    if let Some((_, ch)) = active_report_channel() {\n        ch.try_send(report).is_ok()\n    } else {\n        false\n    }\n}\n\n'''
+    c = c.replace(anchor, wrapper + anchor, 1)
+    channel.write_text(c)
+
+h = host.read_text()
+if "PG1KB_ACTIVE_HID_REPORT_EXPORT_V1" not in h:
+    service_anchor = '#[cfg(feature = "rynk")]\npub use rynk::RynkService as HostService;\n'
+    if service_anchor not in h:
+        raise SystemExit("host service export anchor not found")
+    h = h.replace(service_anchor, '#[allow(unused_imports)]\npub use crate::channel::pg1kb_try_send_hid_report;\n\n' + service_anchor, 1)
+    host.write_text(h)
+
+print("Exported PG1KB active-transport HID report sender")
+
 print("VERIFY OK: PG1KB persistence + split CPI patches installed")
 PY
