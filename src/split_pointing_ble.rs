@@ -1,4 +1,4 @@
-use rmk::channel::BLE_REPORT_CHANNEL;
+use rmk::channel::pg1kb_try_send_hid_report;
 use rmk::event::{Axis, PointingEvent};
 use rmk::hid::Report;
 use rmk::macros::processor;
@@ -125,7 +125,7 @@ impl SplitPointingBleProcessor {
         let x = scaled_x.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let y = scaled_y.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let report = Report::MouseReport(MouseReport { buttons: 0, x, y, wheel: 0, pan: 0 });
-        if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
+        if pg1kb_try_send_hid_report(report) {
             if scaled_x.abs() <= i8::MAX as i32 && scaled_y.abs() <= i8::MAX as i32 {
                 self.cursor_x = 0;
                 self.cursor_y = 0;
@@ -160,7 +160,7 @@ impl SplitPointingBleProcessor {
         if wheel_steps == 0 { return; }
         let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         let report = Report::MouseReport(MouseReport { buttons: 0, x: 0, y: 0, wheel, pan: 0 });
-        if BLE_REPORT_CHANNEL.try_send(report).is_ok() {
+        if pg1kb_try_send_hid_report(report) {
             self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
         } else {
