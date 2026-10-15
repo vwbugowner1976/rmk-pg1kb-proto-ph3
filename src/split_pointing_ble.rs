@@ -16,9 +16,12 @@ pub struct SplitPointingBleProcessor {
     cursor_x: i32,
     cursor_y: i32,
     wheel_accum_q8: i32,
+    pan_accum_q8: i32,
     velocity_q8: i32,
+    pan_velocity_q8: i32,
     input_seen: bool,
     direction: i8,
+    pan_direction: i8,
     last_mode: u8,
     hid_reports: u32,
     hid_busy: u32,
@@ -31,9 +34,12 @@ impl SplitPointingBleProcessor {
             cursor_x: 0,
             cursor_y: 0,
             wheel_accum_q8: 0,
+            pan_accum_q8: 0,
             velocity_q8: 0,
+            pan_velocity_q8: 0,
             input_seen: false,
             direction: 0,
+            pan_direction: 0,
             last_mode: runtime::effective_mode(device_id) as u8,
             hid_reports: 0,
             hid_busy: 0,
@@ -44,9 +50,12 @@ impl SplitPointingBleProcessor {
         self.cursor_x = 0;
         self.cursor_y = 0;
         self.wheel_accum_q8 = 0;
+        self.pan_accum_q8 = 0;
         self.velocity_q8 = 0;
+        self.pan_velocity_q8 = 0;
         self.input_seen = false;
         self.direction = 0;
+        self.pan_direction = 0;
     }
 
     fn sync_mode(&mut self) -> TrackballMode {
@@ -80,32 +89,64 @@ impl SplitPointingBleProcessor {
                 self.cursor_y = self.cursor_y.saturating_add(logical_y);
             }
             TrackballMode::Scroll => {
-                if logical_y == 0 { return; }
-                let incoming_direction: i8 = if logical_y > 0 { 1 } else { -1 };
-                let magnitude = logical_y.abs();
-                let noise = cfg.direction_noise_threshold() as i32;
-                let reverse = cfg.direction_reverse_threshold() as i32;
+                // Vertical wheel uses logical Y; horizontal wheel (HID pan)
+                // uses logical X. Keep their accumulators and direction guards
+                // independent so horizontal-only motion is never discarded.
+                if logical_y != 0 {
+                    let incoming_direction: i8 = if logical_y > 0 { 1 } else { -1 };
+                    let magnitude = logical_y.abs();
+                    let noise = cfg.direction_noise_threshold() as i32;
+                    let reverse = cfg.direction_reverse_threshold() as i32;
 
-                if self.direction == 0 {
-                    if magnitude < noise { return; }
-                    self.direction = incoming_direction;
-                } else if incoming_direction != self.direction {
-                    if magnitude < reverse { return; }
-                    self.direction = incoming_direction;
-                    self.wheel_accum_q8 = 0;
-                    self.velocity_q8 = 0;
+                    if self.direction == 0 {
+                        if magnitude >= noise { self.direction = incoming_direction; }
+                    } else if incoming_direction != self.direction {
+                        if magnitude >= reverse {
+                            self.direction = incoming_direction;
+                            self.wheel_accum_q8 = 0;
+                            self.velocity_q8 = 0;
+                        }
+                    }
+
+                    if self.direction == incoming_direction {
+                        let stable_y = magnitude.saturating_mul(self.direction as i32);
+                        let scale_den = runtime::effective_scroll_scale_den(self.device_id) as i32;
+                        let scroll_q8 = stable_y.saturating_mul(Q8_ONE) / scale_den;
+                        self.wheel_accum_q8 = self.wheel_accum_q8.saturating_add(scroll_q8);
+                        self.velocity_q8 = if runtime::effective_inertia_enabled(self.device_id) {
+                            scroll_q8 / INERTIA_DIV
+                        } else { 0 };
+                        self.input_seen = true;
+                    }
                 }
 
-                let stable_y = magnitude.saturating_mul(self.direction as i32);
-                let scale_den = runtime::effective_scroll_scale_den(self.device_id) as i32;
-                let scroll_q8 = stable_y.saturating_mul(Q8_ONE) / scale_den;
-                self.wheel_accum_q8 = self.wheel_accum_q8.saturating_add(scroll_q8);
-                if runtime::effective_inertia_enabled(self.device_id) {
-                    self.velocity_q8 = scroll_q8 / INERTIA_DIV;
-                } else {
-                    self.velocity_q8 = 0;
+                if logical_x != 0 {
+                    let incoming_direction: i8 = if logical_x > 0 { 1 } else { -1 };
+                    let magnitude = logical_x.abs();
+                    let noise = cfg.direction_noise_threshold() as i32;
+                    let reverse = cfg.direction_reverse_threshold() as i32;
+
+                    if self.pan_direction == 0 {
+                        if magnitude >= noise { self.pan_direction = incoming_direction; }
+                    } else if incoming_direction != self.pan_direction {
+                        if magnitude >= reverse {
+                            self.pan_direction = incoming_direction;
+                            self.pan_accum_q8 = 0;
+                            self.pan_velocity_q8 = 0;
+                        }
+                    }
+
+                    if self.pan_direction == incoming_direction {
+                        let stable_x = magnitude.saturating_mul(self.pan_direction as i32);
+                        let scale_den = runtime::effective_horizontal_scroll_scale_den(self.device_id) as i32;
+                        let pan_q8 = stable_x.saturating_mul(Q8_ONE) / scale_den;
+                        self.pan_accum_q8 = self.pan_accum_q8.saturating_add(pan_q8);
+                        self.pan_velocity_q8 = if runtime::effective_inertia_enabled(self.device_id) {
+                            pan_q8 / INERTIA_DIV
+                        } else { 0 };
+                        self.input_seen = true;
+                    }
                 }
-                self.input_seen = true;
             }
         }
     }
@@ -143,25 +184,41 @@ impl SplitPointingBleProcessor {
         let cfg = runtime::config(self.device_id);
         if self.input_seen {
             self.input_seen = false;
-        } else if runtime::effective_inertia_enabled(self.device_id) && self.velocity_q8 != 0 {
-            self.wheel_accum_q8 = self.wheel_accum_q8.saturating_add(self.velocity_q8);
-            let (decay_num, decay_den) = cfg.inertia_decay();
-            self.velocity_q8 = self.velocity_q8.saturating_mul(decay_num as i32) / decay_den as i32;
-            if self.velocity_q8.abs() < STOP_VELOCITY_Q8 {
-                self.velocity_q8 = 0;
-                self.direction = 0;
+        } else if runtime::effective_inertia_enabled(self.device_id) {
+            if self.velocity_q8 != 0 {
+                self.wheel_accum_q8 = self.wheel_accum_q8.saturating_add(self.velocity_q8);
+                let (decay_num, decay_den) = cfg.inertia_decay();
+                self.velocity_q8 = self.velocity_q8.saturating_mul(decay_num as i32) / decay_den as i32;
+                if self.velocity_q8.abs() < STOP_VELOCITY_Q8 {
+                    self.velocity_q8 = 0;
+                    self.direction = 0;
+                }
+            }
+            if self.pan_velocity_q8 != 0 {
+                self.pan_accum_q8 = self.pan_accum_q8.saturating_add(self.pan_velocity_q8);
+                let (decay_num, decay_den) = cfg.inertia_decay();
+                self.pan_velocity_q8 = self.pan_velocity_q8.saturating_mul(decay_num as i32) / decay_den as i32;
+                if self.pan_velocity_q8.abs() < STOP_VELOCITY_Q8 {
+                    self.pan_velocity_q8 = 0;
+                    self.pan_direction = 0;
+                }
             }
         } else {
             self.velocity_q8 = 0;
+            self.pan_velocity_q8 = 0;
             self.direction = 0;
+            self.pan_direction = 0;
         }
 
         let wheel_steps = self.wheel_accum_q8 / Q8_ONE;
-        if wheel_steps == 0 { return; }
+        let pan_steps = self.pan_accum_q8 / Q8_ONE;
+        if wheel_steps == 0 && pan_steps == 0 { return; }
         let wheel = wheel_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
-        let report = Report::MouseReport(MouseReport { buttons: 0, x: 0, y: 0, wheel, pan: 0 });
+        let pan = pan_steps.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
+        let report = Report::MouseReport(MouseReport { buttons: 0, x: 0, y: 0, wheel, pan });
         if pg1kb_try_send_hid_report(report) {
             self.wheel_accum_q8 = self.wheel_accum_q8.saturating_sub((wheel as i32).saturating_mul(Q8_ONE));
+            self.pan_accum_q8 = self.pan_accum_q8.saturating_sub((pan as i32).saturating_mul(Q8_ONE));
             self.hid_reports = self.hid_reports.saturating_add(1);
         } else {
             self.hid_busy = self.hid_busy.saturating_add(1);
