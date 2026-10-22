@@ -3,6 +3,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# S140 v7.3.0 occupies 0x1000..0x26FFF on XIAO nRF52840 Plus.
+# Refuse to build if the application linker origin moves back into that range.
+if ! grep -Eq 'FLASH[[:space:]]*:[[:space:]]*ORIGIN[[:space:]]*=[[:space:]]*0x0*27000([,[:space:]]|$)' memory.x; then
+    echo "Unsafe memory.x: RMK application FLASH must start at 0x00027000 or later to preserve S140." >&2
+    exit 1
+fi
+
 # Build against a project-local copy of the official crates.io RMK 0.9.0
 # source. This avoids mutating ~/.cargo/registry/src and guarantees Cargo sees
 # the PG1KB patches as a normal path dependency.
