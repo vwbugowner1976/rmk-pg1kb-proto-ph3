@@ -68,5 +68,5 @@ sha256sum "$OUT/rmk-pg1kb-proto-ph3-peripheral-v7.uf2"
 
 echo
 echo 'DONE:'
-echo '  D:\\rmk-firmware\\rmk-pg1kb-proto-ph3-central-v7.uf2'
-echo '  D:\\rmk-firmware\\rmk-pg1kb-proto-ph3-peripheral-v7.uf2'
+echo '  D:\rmk-firmware\rmk-pg1kb-proto-ph3-central-v7.uf2'
+echo '  D:\rmk-firmware\rmk-pg1kb-proto-ph3-peripheral-v7.uf2'
