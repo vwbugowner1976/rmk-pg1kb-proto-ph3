@@ -17,6 +17,9 @@ pub const RYNK_GET_SAVE_STATUS: u16 = 0x0905;
 pub const RYNK_GET_TRACKBALL_STATE: u16 = 0x0906;
 pub const RYNK_GET_LAYER_PROFILE: u16 = 0x0907;
 pub const RYNK_SET_LAYER_PROFILE: u16 = 0x0908;
+pub const RYNK_GET_BATTERY_HISTORY_INFO: u16 = 0x0910;
+pub const RYNK_GET_BATTERY_HISTORY_CHUNK: u16 = 0x0911;
+pub const RYNK_CLEAR_BATTERY_HISTORY: u16 = 0x0912;
 pub const TRACKBALL_LAYER_COUNT: usize = 8;
 const TRACKBALL_CONFIG_WIRE_LEN: usize = 16;
 const TRACKBALL_LAYER_PROFILE_WIRE_LEN: usize = 6;
@@ -352,6 +355,22 @@ pub fn state_wire() -> [u8; 9] {
     /// inertia, but never change the physical sensor orientation.
 pub fn handle_rynk_trackball(msg: &mut RynkMessage<'_>) -> Option<Result<(), RynkError>> {
     match msg.header().cmd.raw() {
+        RYNK_GET_BATTERY_HISTORY_INFO => {
+            if let Err(error) = msg.decode_request::<()>() { return Some(Err(error)); }
+            Some(msg.encode_response(&crate::battery_history::get_info()))
+        }
+        RYNK_GET_BATTERY_HISTORY_CHUNK => {
+            let chunk = match msg.decode_request::<u8>() { Ok(value) => value, Err(error) => return Some(Err(error)) };
+            if chunk as usize >= crate::battery_history::CHUNK_COUNT {
+                return Some(Err(RynkError::Malformed));
+            }
+            Some(msg.encode_response(&crate::battery_history::get_chunk(chunk)))
+        }
+        RYNK_CLEAR_BATTERY_HISTORY => {
+            if let Err(error) = msg.decode_request::<()>() { return Some(Err(error)); }
+            crate::battery_history::request_clear();
+            Some(msg.encode_response(&()))
+        }
         RYNK_GET_TRACKBALL_CONFIG => {
             let device_id = match msg.decode_request::<u8>() { Ok(value) if value <= LEFT_TRACKBALL_ID => value, Ok(_) => return Some(Err(RynkError::Malformed)), Err(error) => return Some(Err(error)) };
             Some(msg.encode_response(&encode_config(device_id)))
