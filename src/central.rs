@@ -2,6 +2,7 @@
 #![no_std]
 
 mod paw3222;
+mod battery_history;
 mod paw3222_ble;
 mod runtime;
 mod split_pointing_ble;
@@ -48,5 +49,10 @@ mod keyboard_central {
     #[register_processor(poll)]
     fn trackball_persistence() -> crate::trackball_persistence::TrackballPersistenceProcessor {
         crate::trackball_persistence::TrackballPersistenceProcessor::new()
+    }
+
+    #[register_processor(poll)]
+    fn battery_history() -> crate::battery_history::BatteryHistoryProcessor {
+        crate::battery_history::BatteryHistoryProcessor::new()
     }
 }
