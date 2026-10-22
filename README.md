@@ -130,3 +130,9 @@ bash build-v7.sh
 
 - [MyKeebStudio](https://github.com/mykeebstudio/mykeebstudio.github.io) — RMK / Rynk のキー配列・トラックボール・Runtime Combo 設定 UI
 - [RMK](https://github.com/HaoboGu/rmk) — Rust ベースのキーボードファームウェアフレームワーク
+
+## バッテリー履歴
+
+MyKeebStudio の RMK Trackball 画面では、ファームウェアに保存したバッテリー残量履歴を `Refresh history` から読み出せます。ファームウェアは30分ごとに残量・充電状態・起動後の経過時間を記録し、最大40件（約20時間分）をリングバッファに保持します。記録はキーボードのフラッシュに保存され、履歴のクリアもMyKeebStudioから実行できます。
+
+この履歴はバッテリー残量の記録であり、電流や実容量を直接測定するものではありません。現時点の実装はRMK側の `BatteryStatusEvent` を記録するため、左右それぞれの電池が別々のイベントとして届くかは実機で確認が必要です。
